@@ -51,6 +51,8 @@ MuDeal의 디자인 시스템은 **극장 벨벳 커튼의 품격과 타임커�
 
 - **Ruby Urgent (`--md-timesale`)** `#A81B3A`: `타임세일`, `오늘 마감`, `YES24데이` 등 시급한 특가 칩 및 쿠폰 버튼에 사용 (원본 `#e11d48`의 역할을 버건디 톤과 이질감 없이 계승).
 - **Ruby Soft (`--md-timesale-soft`)** `#FBE9ED`: `타임세일` / `마감임박` 필 배지 배경.
+- **Community Pick Tag (`--md-community`)** `#6E182B` on `#F9ECEF` (Border `#E6C4CC`): **"제보해주신 딜"** 섹션 카드에 표시되는 제보자 닉네임 배지(`○○님 제보`) 및 `도움이 됐어요` 반응 필.
+- **Actor Follow Pill**: 팔로우 전 `#FFFFFF` + `1px solid #EAE0E1` (`#534649` 텍스트), 팔로우 중 `#F9ECEF` + `1px solid #8A1E37` (`#6E182B` 텍스트 + 채움 하트/별).
 - **Stage Event Plum (`--md-event`)** `#6E182B` on `#F9ECEF` (Border `#E6C4CC`): `싱어롱 데이`, `커튼콜 데이` 등 공연장 현장 이벤트 배지 (와인 톤으로 통일).
 - **Perk / Goods Gold (`--md-gold`)** `#B89352` on `#FAF6EE` (Border `#DFC89F`): `굿즈·특전 증정(포토카드/스페셜 티켓)`, `로터리 티켓`, `최저가 1위` 등 희소 혜택 배지.
 - **Indigo Open (`--md-new`)** `#3B52B8`: `NEW`, `오늘 오픈`, `티켓오픈 공지` 배지 및 2차 정보성 칩(예: 조건부 할인 안내 아이콘).
@@ -202,8 +204,8 @@ Root font-size는 `16px` (`html { font-size: 16px }`), 기본 본문은 `0.875re
   - Center/Right: **Full-Pill Search Bar** (`width: 300px–360px` — 검색 비교 핵심성을 위해 원본 `264px`에서 확장, `height: 44px`, `background: #FCF8F7`, hover `#F6EFEF`, `border-radius: 9999px`, focus `box-shadow: 0 0 0 1.5px #8A1E37, var(--md-e2)`) + 자동완성 드롭다운 (`border-radius: 12px`, `padding: 6px`, `var(--md-e2)`)
   - Far Right: `찜한 공연`, `할인 제보/로그인` 아이콘+라벨(`11px / 500`) 스택 버튼
 - **Tier 2 — Category & Deal Bar (`max-width: 1100px`, `height: 68px`)**:
-  - Left: 오늘 날짜 캘린더 아이콘(`36px`, 상단 `#6E182B` 밴드 + `#F6EFEF` 바디 + `tabular-nums` 일자) + 메인 메뉴 (`홈`, `대극장`, `대학로·중소극장`, `로터리·특가`, `할인 캘린더`) — `18px / 600`, `gap: 18px`, 활성 탭 하단 `3px solid #6E182B` 인디케이터
-  - Right: `타임세일` 강조 필 (`height: 36px`, `border-radius: 9999px`, `#A81B3A` 텍스트, `#FBE9ED` 활성/호버 배경) · `최저가 랭킹` · `예매처별 보기`
+  - Left: 오늘 날짜 캘린더 아이콘(`36px`, 상단 `#6E182B` 밴드 + `#F6EFEF` 바디 + `tabular-nums` 일자) + 메인 메뉴 (`홈`, `4축 검색`, `티켓오픈 임박`, `제보해주신 딜`, `로터리·특가`, `싱어롱·특전` — 문구는 개발 중 유연 조정) — `18px / 600`, `gap: 18px`, 활성 탭 하단 `3px solid #6E182B` 인디케이터
+  - Right: `할인 제보하기` 강조 필 (`height: 36px`, `border-radius: 9999px`, `#8A1E37` 텍스트, `#F9ECEF` 배경)
 
 ### Cards & Containers
 
@@ -214,10 +216,10 @@ Root font-size는 `16px` (`html { font-size: 16px }`), 기본 본문은 `0.875re
   - Top-left (랭킹 전용): `30px × 30px` Curtain Noir(`#2B0D16`) 라운드 코너 순위 태그 (`#FFFFFF` bold tabular-nums; 1~3위는 Champagne Gold `#DFC89F` 숫자)
   - Top-right: `28px` (모바일 `32px`) 찜하기 하트 버튼 (`#FFFFFF` 스트로크, `rgba(31,23,25,0.24)` 채움, 활성 시 `#8A1E37`)
 - **Text Stack (`margin-top: 12px`, 내부 간격 `6px`–`8px`)**:
-  1. 메타 행: `지역 | 예매처 수(예: 4곳 비교)` (좌) + 핀 아이콘 + 공연장명 (우, `#736468`, `13px`)
+  1. 메타 행: `[서울·대학로]` 등 지역 태그 + `예매처 수(예: 4곳 비교)` (좌) + 핀 아이콘 + 공연장명 (우, `#736468`, `13px`)
   2. 공연명: `15px / 500` (`#1F1719`), 데스크톱 2줄 클램프 / 모바일 1줄
-  3. 가격+배지 행: `45%` (`#8A1E37`, `700`) + `66,000원~` (`#1F1719`, `700`) + 할인 유형 칩 (`로터리` 골드 아웃라인 / `Yes24데이` `#FBE9ED`·`#A81B3A` / `NEW` `#EAEFFD`·`#3B52B8`)
-  4. 시그널 행 (선택): `#B89352` 별점 + 리뷰/찜 수 또는 `D-2 마감` (`#F9ECEF`·`#6E182B`)
+  3. 가격+배지 행: `45%` (`#8A1E37`, `700`) + `66,000원~` (`#1F1719`, `700`) + 할인·이벤트 칩 (`로터리`/`특전` 골드 / `싱어롱·커튼콜` 플럼 / `티켓오픈` 인디고)
+  4. 시그널 행 (선택): `D-2 마감` (`#F9ECEF`·`#6E182B`), 또는 제보 딜 카드의 `○○님 제보 · 128명 확인 · 👍 24` (후기/별점은 MVP 제외)
 
 **2. Price Comparison Row / Table (MuDeal 핵심 — 검색 & 상세 페이지)**
 - TimeTicket 상세페이지의 `.detail-price-summary` 티어 리스트를 **다중 예매처 가격 비교 모듈**로 특화 확장
@@ -242,7 +244,7 @@ Root font-size는 `16px` (`html { font-size: 16px }`), 기본 본문은 `0.875re
 - Outer Canvas: `#F6F4F4` (`.detail-page-bg`), Inner Shell: `1100px` = Left `670px` + Gap `30px` + Right Sticky `400px` (`position: sticky; top: 20px; max-height: calc(100vh - 40px)`)
 - **Blurred Poster Header**: `aspect-ratio: 700/320`, 블러 배경(`filter: blur(14px) brightness(0.65)`) + 좌측 `28.5%` 선명한 5:7 포스터(`border-radius: 6px`) + 우하단 스플릿 타임세일/로터리 배지
 - **Sticky Right Panel**: `background: #FFFFFF`, `border: 1px solid #EAE0E1`, `border-radius: 12px` — 좌석등급 선택 칩 + 할인 조건 필터(`무조건만 보기` 토글) + 예매처별 실시간 가격 비교 리스트 + 하단 `최저가 예매처로 이동` (`#8A1E37`, `height: 50px`)
-- **Single-Scroll Stacked Sections**: 탭 전환 없이 `8px` (`#F1ECEC`) 구분 띠로 스택 (`가격 비교표` → `할인 조건·유의사항` → `과거 할인 히스토리` → `공연장 위치·정보` → `FAQ 아코디언`)
+- **Single-Scroll Stacked Sections**: 탭 전환 없이 `8px` (`#F1ECEC`) 구분 띠로 스택 (`가격 비교표` → `현장 이벤트·특전 안내(싱어롱·커튼콜·굿즈)` → `출연 배우(팔로우)` → `공연장 정보(클릭 시 해당 공연장 작품 모아보기)`)
 
 **6. Filter Modal & Sort Dropdown**
 - **Filter Modal (Desktop)**: `max-width: 480px`, `border-radius: 20px`, `padding: 24px`, `box-shadow: 0 10px 40px rgba(31,23,25,0.20)`, Backdrop `rgba(31,23,25,0.42)` + `backdrop-filter: blur(2px)`. 내부 옵션 칩은 `border-radius: 24px` (`#F6EFEF` 기본 / `#8A1E37` 화이트 텍스트 선택) + 하단 풀와이드 `적용하기` CTA.
