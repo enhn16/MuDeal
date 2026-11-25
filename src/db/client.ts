@@ -1,0 +1,14 @@
+import { env } from "cloudflare:workers";
+import { drizzle } from "drizzle-orm/d1";
+import type { CloudflareEnv } from "@/env";
+import * as schema from "./schema";
+
+export function getDb(d1: D1Database) {
+  return drizzle(d1, { schema });
+}
+
+export function getRuntimeDb() {
+  return getDb((env as unknown as CloudflareEnv).DB);
+}
+
+export type AppDb = ReturnType<typeof getDb>;

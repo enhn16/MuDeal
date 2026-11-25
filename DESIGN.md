@@ -8,21 +8,22 @@
 
 MuDeal의 디자인 시스템은 **극장 벨벳 커튼의 품격과 타임커머스의 명료한 정보 밀도**를 결합한 **에디토리얼 티켓팅(Editorial Ticketing)** 스타일입니다. 차가운 무채색 회색 대신 **미세한 로즈·포슬린 톤이 감도는 따뜻한 뉴트럴 서피스**(`#ffffff` / `#fcf8f7` / `#f6efef` / `#eae0e1`) 위에, 대극장 커튼을 연상시키는 **5단계 와인·버건디(Velvet Burgundy)** 컬러 시스템을 역할별로 엄격하게 배치합니다.
 
-원본 TimeTicket의 높은 탐색 효율성(`1100px` 컴팩트 셸, 5:7 세로 포스터 중심의 고밀도 카드 그리드, 정가 대비 할인가의 즉각적 스캔 구조)은 그대로 계승하되, 경쾌한 코랄 레드(`#ff4b4b`)의 캐주얼함을 덜어내고 **절제된 딥 버건디(`#6E182B`) · 와인 액센트(`#8A1E37`) · 커튼 누아르(`#2B0D16`)**로 시각적 신뢰도와 프리미엄 무드를 끌어올립니다. **샴페인 골드(`#B89352`)**는 일반 장식색이 아니라 **로터리 티켓(NOL 로터리 등)·단독 최저가·별점** 같은 특별한 희소성 시그널에만 제한적으로 사용합니다.
+원본 TimeTicket의 높은 탐색 효율성(`1100px` 컴팩트 셸, 5:7 세로 포스터 중심의 고밀도 카드 그리드, 정가 대비 할인가의 즉각적 스캔 구조)은 그대로 계승하되, 캐주얼한 코랄 레드 톤을 덜어내고 **절제된 딥 버건디(`#6E182B`) · 와인 액센트(`#8A1E37`) · 커튼 누아르(`#2B0D16`)**로 시각적 신뢰도와 프리미엄 무드를 끌어올립니다. **샴페인 골드(`#B89352`)**는 일반 장식색이 아니라 **로터리 티켓(NOL 로터리 등)·단독 최저가 1위·굿즈/특전 증정** 같은 특별한 희소성 시그널에만 제한적으로 사용합니다.
 
-타이포그래피는 **Pretendard Variable**을 전면에 배치해 한글 공연명·예매처명·좌석등급·할인율의 가독성을 극대화하며, 모든 숫자(할인율, 판매가, 정가 취소선, 평점, 캘린더 날짜, D-Day)에는 예외 없이 `font-variant-numeric: tabular-nums`를 적용해 가격 비교 시 세로 정렬이 흔들리지 않도록 합니다. 히어로 스포트라이트나 에디토리얼 배너의 극적 모멘트에만 세리프(`Noto Serif KR` / `Playfair Display`)를 제한적으로 허용해 대극장 프로그램북 같은 품격을 더합니다.
+타이포그래피는 **Pretendard Variable**을 전면에 배치해 한글 공연명·예매처명·좌석등급·할인율의 가독성을 극대화하며, 모든 숫자(할인율, 판매가, 정가 취소선, 캘린더 날짜, D-Day)에는 예외 없이 `font-variant-numeric: tabular-nums`를 적용해 가격 비교 시 세로 정렬이 흔들리지 않도록 합니다. 히어로 스포트라이트나 에디토리얼 배너의 극적 모멘트에만 세리프(`Noto Serif KR` / `Playfair Display`)를 제한적으로 허용해 대극장 프로그램북 같은 품격을 더합니다.
 
 **Key Characteristics:**
-- **5-Tier Wine / Burgundy 브랜드 시스템**: 단일 버건디를 남용하지 않고 Velvet Burgundy(브랜드 앵커) / Wine Accent(CTA·할인율) / Curtain Noir(다크 스포트라이트 밴드) / Mulberry(다크 보조) / Rosé Mist(소프트 틴트)를 서피스 역할별로 매핑
-- **Champagne Gold 희소성 원칙**: 골드(`#B89352`)는 로터리 티켓, 최저가 1위 배지, 별점에만 사용 — 일반 강조색으로 남용 금지
-- **웜 포슬린·블러시 뉴트럴 캔버스**: 순백(`#ffffff`) 캔버스에 차가운 `#f5f5f5` 대신 미세한 와인 언더톤이 섞인 `#fcf8f7` / `#f6efef` / `#eae0e1`을 층위별로 배치해 버건디 브랜드 컬러와 자연스럽게 융합
+- **5-Tier Wine / Burgundy 브랜드 시스템**: 단일 버건디를 남용하지 않고 Velvet Burgundy(브랜드 앵커) / Wine Accent(CTA·할인율) / Curtain Noir(다크 스포트라이트 밴드) / Mulberry(다크 보조·티켓오픈 배지) / Rosé Mist(소프트 틴트)를 서피스 역할별로 매핑
+- **Champagne Gold 희소성 원칙**: 골드(`#B89352`)는 로터리 티켓, 최저가 1위 배지, 굿즈·특전 증정 시그널에만 사용 — 일반 강조색으로 남용 금지
+- **이질적 원색(초록·황토·생파랑) 전면 배제**: 상태·조건·캘린더 배지까지 모두 **와인/버건디 + 샴페인 골드 + 웜 뉴트럴** 스펙트럼 안에서 명도와 채도 차이로 구분해 브랜드 일관성을 극대화
+- **웜 포슬린·블러시 뉴트럴 캔버스**: 순백(`#FFFFFF`) 캔버스에 차가운 회색 대신 미세한 와인 언더톤이 섞인 `#FCF8F7` / `#F6EFEF` / `#EAE0E1`을 층위별로 배치해 버건디 브랜드 컬러와 자연스럽게 융합
 - **5:7 공연 포스터 중심 아키텍처**: 모든 포스터 카드에 `aspect-ratio: 5/7`, `8px` 라운드, `1px` 내부 헤어라인(`inset 0 0 0 1px rgba(9,9,11,0.06)`)을 적용해 흰 배경 포스터의 경계 붕괴를 방지
 - **Pretendard Variable + Tabular Numbers**: 본문 `14px`, 타이트한 네거티브 자간(`-0.02em` ~ `-0.03em`)과 `tabular-nums`로 다중 예매처 가격 비교의 스캔 속도 최적화
-- **TimeTicket형 멀티 덴시티 홈 리듬**: 3열 정사각 히어로 → 6열 마감임박 레일 → 5열 랭킹 그리드 → 50/50 비대칭 스플릿(신규 오픈 | 로터리·특가) → 3열 탭형 예매처별 리스트 → 다크 버건디 스포트라이트 밴드 → 2단 푸터
+- **TimeTicket형 멀티 덴시티 홈 리듬**: 슬림 1단 헤더 → 3열 정사각 히어로 → 6열 마감임박 레일 → 티켓오픈 임박 → 다크 버건디 스포트라이트 밴드 → 제보해주신 딜 → 5열 할인 카드 그리드 → 초슬림 미니 푸터
 - **속삭이는 듯한 다층 엘리베이션**: 무거운 단일 그림자 대신 3겹 저불투명도(`0.03`~`0.06`) 링+드롭 섀도우와 은은한 버건디 CTA 글로우 사용
 
 **Page Rhythm (Homepage Color-Block Flow):**
-화이트 2단 헤더(`158px`, `--md-e1`) → 3열 정사각 히어로 캐러셀 → 화이트 캔버스 위 6열 마감임박 레일 & 5열 랭킹 그리드 → 50/50 비대칭 스플릿(신규 할인 | 로터리·초대) → **딥 커튼 누아르(`#2B0D16`) 스페셜 특가 밴드(Yes24데이·NOL 로터리 스포트라이트)** → 탭형 예매처/할인유형 리스트 → 4~5열 할인 카드 그리드 → 화이트 상단 + 웜 아이보리(`#fcf8f7`) 하단 2단 푸터.
+화이트 슬림 1단 헤더(`68px`, `--md-e1`) → 3열 정사각 히어로 캐러셀 → 화이트 캔버스 위 6열 마감임박 레일 & 티켓오픈 임박 레일 → **딥 커튼 누아르(`#2B0D16`) 스페셜 특가 밴드(Yes24데이·NOL 로터리 스포트라이트)** → **`제보해주신 딜` 전용 섹션** → 유형별 필터 & 5열 할인 카드 그리드 → 웜 포슬린(`#FCF8F7`) 초슬림 1줄 미니 푸터.
 
 ---
 
@@ -30,7 +31,7 @@ MuDeal의 디자인 시스템은 **극장 벨벳 커튼의 품격과 타임커�
 
 **Source pages analyzed (`timeticket.co.kr`):** Homepage (`/`), Musical Category Listing (`/genre/musical`), Search Results (`/search/result?keyword=뮤지컬`), Musical Product Detail Page (`/product/4896`).
 
-> **Color Adaptation Mapping**: TimeTicket 원본의 코랄 레드(`#ff4b4b`), 로즈 크림슨(`#e11d48`), 웜 블러시 뉴트럴(`#fcf5f4`/`#f6eeed`/`#eae3e2`) 구조를 계승하되, 브랜드 핵심 컬러를 고품격 **Wine / Burgundy** 팔레트로 전면 재설계하고, 과도한 보라색 그라데이션(원본 AI 요약 카드)은 시스템 일관성을 위해 **Rosé Mist + Champagne Gold** 에디토리얼 톤으로 정제했습니다.
+> **Color Adaptation Mapping**: TimeTicket 원본의 고밀도 정보 구조와 웜 뉴트럴 계층은 계승하되, 캐주얼한 코랄·크림슨 및 보라색 그라데이션을 배제하고 **5-Tier Wine / Burgundy + Champagne Gold + Warm Porcelain** 팔레트로 전면 통일했습니다.
 
 ### Primary (5-Tier Wine / Burgundy System)
 
@@ -43,52 +44,56 @@ MuDeal의 디자인 시스템은 **극장 벨벳 커튼의 품격과 타임커�
 
 ### Secondary & Ceremony Accent (Champagne Gold)
 
-- **Champagne Gold (`--md-gold`)** `#B89352`: **희소성·프리미엄 시그널 전용**. 별점 아이콘(`★`), `로터리 티켓` 배지 보더/텍스트, `역대 최저가` 인증 배지, 다크 밴드(`#2B0D16`) 위 하이라이트 텍스트에만 사용. 일반 버튼이나 링크에 사용하지 않음.
-- **Gold Soft (`--md-gold-soft`)** `#DFC89F`: 다크 커튼 누아르 서피스 위 보조 골드 라인, 아이콘, 미세 구분선.
-- **Gold Wash (`--md-gold-wash`)** `#FAF6EE`: 로터리/단독 제휴 특가 카드, 에디토리얼 요약 박스 배경 워시.
+- **Champagne Gold (`--md-gold`)** `#B89352`: **희소성·프리미엄 시그널 전용**. `로터리 티켓` 배지 보더/텍스트, `최저가 1위` 행 좌측 액센트, `굿즈·특전 증정` 배지, 다크 밴드(`#2B0D16`) 위 하이라이트 텍스트에만 사용. 일반 버튼이나 링크에 사용하지 않음.
+- **Gold Soft (`--md-gold-soft`)** `#DFC89F`: 다크 커튼 누아르 서피스 위 보조 골드 라인, 아이콘, 골드 배지 보더.
+- **Gold Wash (`--md-gold-wash`)** `#FAF6EE`: 로터리/단독 제휴 특가 카드, 최저가 1위 행, 에디토리얼 요약 박스 배경 워시.
 
-### Urgent Deal & Channel Accents
+### Deal, Event & Channel Roles (와인·골드·뉴트럴 통일 규칙)
 
-- **Ruby Urgent (`--md-timesale`)** `#A81B3A`: `타임세일`, `오늘 마감`, `YES24데이` 등 시급한 특가 칩 및 쿠폰 버튼에 사용 (원본 `#e11d48`의 역할을 버건디 톤과 이질감 없이 계승).
-- **Ruby Soft (`--md-timesale-soft`)** `#FBE9ED`: `타임세일` / `마감임박` 필 배지 배경.
-- **Community Pick Tag (`--md-community`)** `#6E182B` on `#F9ECEF` (Border `#E6C4CC`): **"제보해주신 딜"** 섹션 카드에 표시되는 제보자 닉네임 배지(`○○님 제보`) 및 `도움이 됐어요` 반응 필.
-- **Actor Follow Pill**: 팔로우 전 `#FFFFFF` + `1px solid #EAE0E1` (`#534649` 텍스트), 팔로우 중 `#F9ECEF` + `1px solid #8A1E37` (`#6E182B` 텍스트 + 채움 하트/별).
-- **Stage Event Plum (`--md-event`)** `#6E182B` on `#F9ECEF` (Border `#E6C4CC`): `싱어롱 데이`, `커튼콜 데이` 등 공연장 현장 이벤트 배지 (와인 톤으로 통일).
-- **Perk / Goods Gold (`--md-gold`)** `#B89352` on `#FAF6EE` (Border `#DFC89F`): `굿즈·특전 증정(포토카드/스페셜 티켓)`, `로터리 티켓`, `최저가 1위` 등 희소 혜택 배지.
-- **Indigo Open (`--md-new`)** `#3B52B8`: `NEW`, `오늘 오픈`, `티켓오픈 공지` 배지 및 2차 정보성 칩(예: 조건부 할인 안내 아이콘).
-- **Indigo Soft (`--md-new-soft`)** `#EAEFFD`: `NEW` / `오늘 오픈` 필 배지 배경.
+> **No Off-Palette Hues**: 와인·버건디 무드를 깨는 원색 초록·황토갈색·생파랑을 배제하고, 모든 배지·조건·오픈 시그널을 **와인 5단계 + 샴페인 골드 + 웜 뉴트럴** 조합만으로 구분합니다.
+
+- **Ruby Urgent / Error (`--md-urgent`)** `#9E1B32` on `#FBECEF`: `타임세일`, `오늘 마감`, `YES24데이` 등 시급한 특가 칩 및 폼 입력 오류 메시지에 통합 사용 (버건디 톤과 자연스럽게 어우러지는 딥 루비).
+- **Ticket Open / NEW (`--md-open`)** `#FFFFFF` on `#4A1525` (또는 `#2B0D16` on `#F6EFEF`, Border `#D2C5C7`): `티켓오픈 임박`, `NEW`, `오늘 오픈` 배지. (생파랑 대신 극장 암막·멀버리 톤으로 통일)
+- **Unconditional Deal (`무조건 할인`)**: `#6E182B` on `#F9ECEF` (Border `#E6C4CC`) — 누구나 바로 적용 가능한 할인 강조.
+- **Conditional / Lottery Deal (`추첨·조건부`)**: `#534649` on `#F6EFEF` (Border `#D2C5C7`) — 카드·재관람·직장인·학생 등 조건부 할인(차분한 웜 스톤 톤으로 무조건 할인과 즉시 대비).
+- **Community Pick Tag (`제보해주신 딜`)**: `#6E182B` on `#F9ECEF` (Border `#E6C4CC`) — 제보자 닉네임 배지(`○○님 제보`) 및 `도움이 됐어요` 활성 필.
+- **Stage Event (`싱어롱·커튼콜`)**: `#6E182B` on `#F9ECEF` (Border `#E6C4CC`) — 공연장 현장 이벤트 배지.
+- **Perk / Goods / Lottery (`특전·로터리·최저가 1위`)**: `#B89352` on `#FAF6EE` (Border `#DFC89F`) — 희소 혜택 배지.
+- **Actor Follow Pill**: 팔로우 전 `#FFFFFF` + `1px solid #EAE0E1` (`#534649`), 팔로우 중 `#F9ECEF` + `1px solid #8A1E37` (`#6E182B`).
+- **Sold Out / Ended (`매진·마감`)**: `#736468` on `#EFE5E6` (Border `#D2C5C7`) — 무채 웜 뉴트럴로 시선을 자연스럽게 후퇴.
 
 ### Surface & Background (Warm Porcelain & Wine-Undertone Neutrals)
 
 - **Pure Surface (`--md-surface`)** `#FFFFFF`: 기본 페이지 캔버스, 상품 카드, 헤더, 데스크톱 스티키 사이드바.
-- **Porcelain Variant (`--md-surface-variant`)** `#FCF8F7`: 검색 입력창 필 배경, 카드/리스트 행 호버, 푸터 하단 사업자 정보 바, 스켈레톤 하이라이트.
+- **Porcelain Variant (`--md-surface-variant`)** `#FCF8F7`: 검색 입력창 필 배경, 카드/리스트 행 호버, 푸터 하단 정보 바, 스켈레톤 하이라이트.
 - **Sunken Blush (`--md-surface-sunken`)** `#F6EFEF`: 포스터 로딩 플레이스홀더, 보조 칩, 상세페이지 가격 비교 요약 박스, 모바일 푸터 배경.
-- **Sunken Deep (`--md-surface-sunken-2`)** `#EFE5E6`: 칩 호버 상태, 날짜 보조 칩, 중립 선택 영역.
+- **Sunken Deep (`--md-surface-sunken-2`)** `#EFE5E6`: 칩 호버 상태, 마감/종료 배지, 중립 선택 영역.
 - **Detail Outer Backdrop (`--md-backdrop`)** `#F6F4F4`: 상세/가격비교 페이지(PDP)의 좌우 외부 여백 배경(`1100px` 작업 영역을 부각).
 - **Section Band Divider (`--md-band`)** `#F1ECEC`: 상세 페이지 내 섹션 간 `8px` (`0.5rem`) 구분 띠, 테이블 헤더, 타임라인 세로선.
 
 ### Borders & Dividers
 
 - **Default Border (`--md-border`)** `#EAE0E1`: 내비게이션 하단선, 필터 필 테두리, 카드 리스트 행 구분선, 푸터 상단선, 드롭다운 외곽선.
-- **Strong Border (`--md-border-strong`)** `#D2C5C7`: 세로 파이프(`|`) 구분자, `더보기` 버튼 테두리, 수량 스테퍼, 모달 그래버(grabber).
-- **Subtle Hairline (`--md-hairline`)** `#F2ECEC`: FAQ 아코디언 행 구분선, 가격 비교표 내부 미세 행선.
+- **Strong Border (`--md-border-strong`)** `#D2C5C7`: 세로 파이프(`|`) 구분자, `더보기` 버튼 테두리, 모달 그래버(grabber).
+- **Subtle Hairline (`--md-hairline`)** `#F2ECEC`: 가격 비교표 내부 미세 행선.
 
 ### Neutrals & Text
 
 - **Primary Ink (`--md-ink`)** `#1F1719`: 미세한 와인 기운을 품은 딥 차콜. 메인 제목, 할인가, 활성 내비게이션, 강조 본문에 사용(순수 `#000` 대신 사용해 따뜻한 캔버스와 조화).
 - **Body Base (`--md-body`)** `#352D2F`: 기본 본문 텍스트 및 상세 페이지 설명 카피.
-- **Secondary Ink (`--md-ink-2`)** `#534649`: 비활성 상단 내비게이션, 섹션 `더보기` 링크, 푸터 링크, 예매처 조건 보조 텍스트.
-- **Muted Text (`--md-muted`)** `#736468`: 공연장명, 지역/장르 메타데이터, 리뷰 수, 서브타이틀, 수수료/조건 안내. (White 대비 `5.6:1` — WCAG AA 충족)
+- **Secondary Ink (`--md-ink-2`)** `#534649`: 비활성 상단 내비게이션, 섹션 `더보기` 링크, 푸터 링크, 예매처 조건 보조 텍스트, **캘린더 토요일 숫자**.
+- **Muted Text (`--md-muted`)** `#736468`: 공연장명, 지역/장르 메타데이터, 서브타이틀, 수수료/조건 안내. (White 대비 `5.6:1` — WCAG AA 충족)
 - **Hint & Strikethrough (`--md-hint`)** `#B3A6A9`: 검색창 플레이스홀더, **정가 취소선(`50,000원`)**, 메타 아이콘, 저작권 표기.
 - **Text on Dark (`--md-ink-inverse`)** `#FFFFFF`: Curtain Noir(`#2B0D16`) 밴드 및 버건디 CTA 위 주 텍스트.
 - **Text Soft on Dark (`--md-ink-inverse-soft`)** `rgba(255, 255, 255, 0.74)`: 다크 버건디 서피스 위 보조 설명·캡션.
 
-### Semantic & Status
+### Calendar & State Mapping (추가 원색 없음)
 
-- **Success / Verified Lowest (`--md-success`)**: `#266D45` on `#EBF5EE` (실시간 가격 확인 완료, 무조건 할인 가능 상태)
-- **Warning / Low Stock (`--md-warning`)**: `#8C6214` on `#FBF2E2` (잔여 매수 임박 예: `2매 남음`, 조건부 할인 주의)
-- **Danger / Sold Out (`--md-danger`)**: `#B4232A` on `#FDECEC` (매진 제보, 폼 오류, 유효하지 않은 입력)
-- **Saturday Blue (`--md-sat`)**: `#4366D9` (캘린더 토요일) / **Sunday Wine**: `#8A1E37` (캘린더 일요일·공휴일)
+- **검증 완료 / 무조건 할인**: `Velvet Burgundy (#6E182B)` on `Rosé Mist (#F9ECEF)`
+- **조건부 할인 / 안내 주의**: `Secondary Ink (#534649)` on `Sunken Blush (#F6EFEF)` (희소·로터리는 `Champagne Gold #B89352` on `#FAF6EE`)
+- **시급 마감 / 폼 오류**: `Ruby Urgent (#9E1B32)` on `#FBECEF`
+- **매진 / 비활성**: `Muted Text (#736468)` on `Sunken Deep (#EFE5E6)`
+- **캘린더 요일**: 평일 `#352D2F` · 토요일 `#534649` (굵기 `600`) · 일요일/공휴일 `Wine Accent (#8A1E37)` · 선택일 원형 `Velvet Burgundy (#6E182B)` + `#FFFFFF` 텍스트
 
 ### Alpha Ladders & Scrims
 
@@ -101,7 +106,7 @@ MuDeal의 디자인 시스템은 **극장 벨벳 커튼의 품격과 타임커�
 - 허용되는 예외는 딱 2가지입니다:
   1. **히어로 배너 하단 가독성 스크림**: `linear-gradient(180deg, rgba(31,23,25,0) 30%, rgba(31,23,25,0.38) 58%, rgba(43,13,22,0.82) 100%)`
   2. **상세 이미지 접힘 페이드**: `linear-gradient(180deg, rgba(255,255,255,0) 0%, #ffffff 100%)`
-- TimeTicket 원본의 보라색 AI 요약 카드 그라데이션은 MuDeal에서 배제하고, **Gold Wash(`#FAF6EE`) + `1px solid #E8DEC8`** 기반의 정제된 에디토리얼 요약 카드로 대체합니다.
+- TimeTicket 원본의 보라색 AI 요약 카드 그라데이션은 MuDeal에서 배제하고, **Gold Wash(`#FAF6EE`) + `1px solid #DFC89F`** 기반의 정제된 에디토리얼 요약 카드로 대체합니다.
 
 ---
 
@@ -127,7 +132,7 @@ Root font-size는 `16px` (`html { font-size: 16px }`), 기본 본문은 `0.875re
 | **PDP Show Title (H1)** | `1.25rem` (`20px`) | `1.25rem` (`20px`) | `700` | `1.35` | `-0.03em` | `--md-ink` |
 | **PDP Section Title (H2)** | `1.125rem` (`18px`) | `1.125rem` (`18px`) | `700` | `1.35` | `-0.03em` | `--md-ink` |
 | **Top Nav Links** | `1.125rem` (`18px`) | Bottom Tab `10px` | `600` | `1.2` | `0.01em` | `--md-ink-2` (`--md-ink` active) |
-| **Top Nav Utility Chips** | `1rem` (`16px`) | N/A | `700` (특가) / `500` | `1.2` | `normal` | `--md-timesale` / `--md-ink-2` |
+| **Top Nav Utility Chips** | `1rem` (`16px`) | N/A | `700` (특가) / `500` | `1.2` | `normal` | `--md-urgent` / `--md-ink-2` |
 | **Search Input** | `0.9375rem` (`15px`) | `1rem` (`16px`) | `600` (`400` placeholder) | `1.25` | `-0.01em` | `--md-ink` (`--md-hint`) |
 | **Card Title** | `0.9375rem` (`15px`, 4열 `16px`) | `0.875rem` (`14px`) | `500` (`600` 강조형) | `1.4` (`1.35` mob) | `-0.01em` | `--md-ink` |
 | **Card Discount %** | `0.9375rem` (`15px`) | `0.8125rem` (`13px`) | `700` | `1.5` | `-0.01em` | `--md-accent` (`tabular-nums`) |
@@ -195,17 +200,27 @@ Root font-size는 `16px` (`html { font-size: 16px }`), 기본 본문은 `0.875re
 - Background: `#FFFFFF` with `1px solid #EAE0E1` and `--md-e2` shadow (또는 Primary 강조 시 `#6E182B` fill + white chevron)
 - Position: `fixed; bottom: 40px; right: 40px` (Mobile: `bottom: calc(76px + env(safe-area-inset-bottom)); right: 16px`)
 
-### Navigation & Header
+### Navigation, Header & Mini Footer
 
-**Desktop Two-Tier Global Header (Total Height: `158px`)**
-- Background: `#FFFFFF`, Elevation: `var(--md-e1)`
-- **Tier 1 — Utility & Search Row (`max-width: 1100px`, `padding: 28px 0 4px`)**:
-  - Left: MuDeal 워드마크 로고 (`width: 160px–192px`, Velvet Burgundy `#6E182B`)
-  - Center/Right: **Full-Pill Search Bar** (`width: 300px–360px` — 검색 비교 핵심성을 위해 원본 `264px`에서 확장, `height: 44px`, `background: #FCF8F7`, hover `#F6EFEF`, `border-radius: 9999px`, focus `box-shadow: 0 0 0 1.5px #8A1E37, var(--md-e2)`) + 자동완성 드롭다운 (`border-radius: 12px`, `padding: 6px`, `var(--md-e2)`)
-  - Far Right: `찜한 공연`, `할인 제보/로그인` 아이콘+라벨(`11px / 500`) 스택 버튼
-- **Tier 2 — Category & Deal Bar (`max-width: 1100px`, `height: 68px`)**:
-  - Left: 오늘 날짜 캘린더 아이콘(`36px`, 상단 `#6E182B` 밴드 + `#F6EFEF` 바디 + `tabular-nums` 일자) + 메인 메뉴 (`홈`, `4축 검색`, `티켓오픈 임박`, `제보해주신 딜`, `로터리·특가`, `싱어롱·특전` — 문구는 개발 중 유연 조정) — `18px / 600`, `gap: 18px`, 활성 탭 하단 `3px solid #6E182B` 인디케이터
-  - Right: `할인 제보하기` 강조 필 (`height: 36px`, `border-radius: 9999px`, `#8A1E37` 텍스트, `#F9ECEF` 배경)
+**Desktop Single-Tier Slim Global Header (Height: `68px`, Sticky Top)**
+- **설계 원칙**: 글로벌 헤더에 검색 입력창과 `검색` 탭을 중복 배치하지 않고, **`MY`와 동일하게 `[🔍 검색]`을 우측 전용 진입 버튼으로 분리**한다. 1단 슬림 헤더로 상단 높이를 줄여 첫 화면에 포스터 콘텐츠가 더 시원하게 노출되며, 모바일 하단 탭바(`홈 · 검색 · 제보 · MY`)와 구조가 1:1로 일치한다.
+- Background: `#FFFFFF`, Border-bottom: `1px solid #EAE0E1`, Elevation: `var(--md-e1)`
+- Container (`max-width: 1100px`, `height: 68px`, `display: flex; align-items: center; justify-content: space-between`):
+  - **Left**: MuDeal 워드마크 로고 (Velvet Burgundy `#6E182B`, `font-weight: 800`, 서브태그 선택)
+  - **Center**: 메인 탐색 메뉴 (`홈`, `티켓오픈 임박`, `제보해주신 딜`, `로터리·특가`, `싱어롱·특전` — `검색` 탭 제외, 문구는 개발 중 유연 조정) — `15px–16px / 600`, `gap: 24px`, 비활성 `#534649`, 활성 `#1F1719` + 하단 `2.5px solid #6E182B` 인디케이터
+  - **Right (Dedicated Utility Cluster)**:
+    - **`🔍 검색`** 전용 버튼 (`height: 36px`, `padding: 0 14px`, `border-radius: 9999px`, `#FCF8F7` bg, `1px solid #EAE0E1`, hover `#F6EFEF` — `/search` 이동 시 본문 검색창 자동 포커스, 단축키 `/` 지원; `/search` 활성 시 `#F9ECEF` bg + `#8A1E37` border + `#6E182B` text)
+    - **`할인 제보`** 보조 버튼 (`height: 36px`, `border-radius: 9999px`, `#FFFFFF` bg, `1px solid #EAE0E1`, `#534649`)
+    - **`MY` / `로그인`** 버튼 (`height: 36px`, `border-radius: 9999px`, `#F9ECEF` bg, `#6E182B` text + 미확인 소식 카운트 배지 `#8A1E37`)
+
+**Dedicated Search Page Integrated Bar (`/search` 본문 최상단)**
+- 헤더에서 분리된 키워드 검색 입력창(`height: 48px`, `#FCF8F7` bg, `border-radius: 12px`, focus `1.5px #8A1E37`)과 **4축 필터(날짜/기간 · 지역 `서울·대학로` 분리 · 가격대 · 할인/조건)**를 단일 `#FFFFFF` 카드(`border: 1px solid #EAE0E1`, `border-radius: 16px`, `padding: 20px`) 안에 하나로 묶어 시각적 단절을 없앤다.
+
+**Ultra-Slim Mini Footer (1–2 Lines, No 3-Column Corporate Grid)**
+- Background: `#FCF8F7`, Border-top: `1px solid #EAE0E1`, `padding: 20px 0`
+- Container (`max-width: 1100px`, `display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap`):
+  - Left: `MuDeal · 외부 예매처 할인·이벤트 비교 서비스 (자체 결제·발권 미제공 · KOPIS 공공데이터 활용)` (`12px`, `#736468`)
+  - Right: `© 2026 MuDeal` (`12px`, `#B3A6A9` — 실제 공개·소셜 로그인 연동 시점에만 `이용약관 · 개인정보처리방침` 미니 링크 2개 추가, 초기 시안/개발 중에는 생략 가능)
 
 ### Cards & Containers
 
@@ -218,7 +233,7 @@ Root font-size는 `16px` (`html { font-size: 16px }`), 기본 본문은 `0.875re
 - **Text Stack (`margin-top: 12px`, 내부 간격 `6px`–`8px`)**:
   1. 메타 행: `[서울·대학로]` 등 지역 태그 + `예매처 수(예: 4곳 비교)` (좌) + 핀 아이콘 + 공연장명 (우, `#736468`, `13px`)
   2. 공연명: `15px / 500` (`#1F1719`), 데스크톱 2줄 클램프 / 모바일 1줄
-  3. 가격+배지 행: `45%` (`#8A1E37`, `700`) + `66,000원~` (`#1F1719`, `700`) + 할인·이벤트 칩 (`로터리`/`특전` 골드 / `싱어롱·커튼콜` 플럼 / `티켓오픈` 인디고)
+  3. 가격+배지 행: `45%` (`#8A1E37`, `700`) + `66,000원~` (`#1F1719`, `700`) + 할인·이벤트 칩 (`로터리`/`특전` 골드 / `싱어롱·커튼콜` 와인 / `티켓오픈` 멀버리 `#4A1525`)
   4. 시그널 행 (선택): `D-2 마감` (`#F9ECEF`·`#6E182B`), 또는 제보 딜 카드의 `○○님 제보 · 128명 확인 · 👍 24` (후기/별점은 MVP 제외)
 
 **2. Price Comparison Row / Table (MuDeal 핵심 — 검색 & 상세 페이지)**
@@ -227,7 +242,7 @@ Root font-size는 `16px` (`html { font-size: 16px }`), 기본 본문은 `0.875re
 - **Seat Grade Tabs**: 상단 `VIP / R / S / A / 전석` 필 또는 언더라인 탭 (`height: 44px`, 활성 시 `2px solid #6E182B`, `#6E182B` bold)
 - **Lowest Price Summary Box**: `#F6EFEF` 배경, `padding: 16px`, `border-radius: 10px` — 일반 할인 최저가 vs 조건부/로터리 최저가를 분리 표기 (`정가 취소선 #B3A6A9` + `할인율 #8A1E37` + `최저가 #1F1719`)
 - **Per-Channel Row**: `padding: 14px 16px`, `border-bottom: 1px solid #F2ECEC`, `display: flex; align-items: center; justify-content: space-between`
-  - Left: 예매처 로고/배지(`유니켓`, `L티켓`, `NOL 로터리`, `Yes24`, `타임티켓`) + 할인 조건 칩(`무조건` `#EBF5EE/#266D45` vs `추첨/조건부` `#FBF2E2/#8C6214`) + 예매 수수료 표기(`12px #736468`)
+  - Left: 예매처 로고/배지(`NOL티켓`, `엘티켓`, `YES24티켓`, `티켓링크`, `샤롯데씨어터`) + 할인 조건 칩(`무조건` `#F9ECEF/#6E182B` vs `추첨/조건부` `#F6EFEF/#534649`) + 예매 수수료 표기(`12px #736468`)
   - Right: 할인율(`#8A1E37 700`) + 최종가(`#1F1719 700 tabular-nums`) + `예매처 이동 ↗` 아웃라인/와인 버튼 (`height: 34px`, `border-radius: 8px`) + 미세 `품절 제보` 텍스트 버튼
   - **Best Deal Row Highlight**: 1위 최저가 행은 좌측 `3px solid #B89352` (Champagne Gold) 액센트 + `#FAF6EE` 미세 배경 + `최저가` 골드 배지 부여
 
@@ -328,20 +343,20 @@ Root font-size는 `16px` (`html { font-size: 16px }`), 기본 본문은 `0.875re
 
 ### Do
 - **와인/버건디 5단계 역할 분리 준수**: 브랜드 앵커(`#6E182B`), CTA·할인율(`#8A1E37`), 다크 밴드(`#2B0D16`), 소프트 틴트(`#F9ECEF`)를 지정된 용도에 맞춰 사용
-- **웜 포슬린·블러시 뉴트럴 사용**: 보조 배경과 구분선에 차가운 회색(`#f3f4f6`, `#e5e7eb`) 대신 `#FCF8F7`, `#F6EFEF`, `#EAE0E1`을 사용해 버건디와 온도를 맞춤
-- **Champagne Gold(`#B89352`)의 희소성 유지**: 로터리 티켓, 역대 최저가 1위, 별점 등 "특별한 가치" 시그널에만 사용
-- **모든 숫자에 `tabular-nums` 적용**: 할인율, 판매가, 정가 취소선, 잔여석, 캘린더 일자 정렬 일관성 보장
+- **웜 포슬린·블러시 뉴트럴 사용**: 보조 배경과 구분선에 차가운 쿨그레이 대신 `#FCF8F7`, `#F6EFEF`, `#EAE0E1`을 사용해 버건디와 온도를 맞춤
+- **Champagne Gold(`#B89352`)의 희소성 유지**: 로터리 티켓, 역대 최저가 1위, 굿즈·특전 증정 등 "특별한 가치" 시그널에만 사용
+- **모든 숫자에 `tabular-nums` 적용**: 할인율, 판매가, 정가 취소선, 캘린더 일자, D-Day 정렬 일관성 보장
 - **5:7 포스터에 `1px` 인셋 링 적용**: 흰 여백이 많은 뮤지컬 포스터가 흰 캔버스와 섞이지 않도록 보호
-- **검색·상세에서 조건부 할인 명시**: 무조건 할인(`#266D45`)과 추첨/카드/재관람 조건부 할인(`#8C6214`)을 색상·라벨로 즉시 구분
+- **검색·상세에서 조건부 할인 명시**: 무조건 할인(`#6E182B` on `#F9ECEF`)과 추첨/카드/재관람 조건부 할인(`#534649` on `#F6EFEF`)을 와인/스톤 대비와 라벨로 즉시 구분
 - **모바일·데스크톱 전환을 표준 CSS 반응형으로 구현**: TimeTicket의 UA 분기(`is-web`/`is-mobile`) 한계를 개선해 모든 뷰포트에서 가로 스크롤 없이 자연스럽게 리플로우
 
 ### Don't
-- **형광 레드/코랄(`#ff4b4b`, `#ff0000`) 혼입 금지**: 와인/버건디의 고급스러운 무드를 즉시 무너뜨림
+- **형광 레드/코랄 및 이질적 원색(초록·황토갈색·생파랑) 혼입 금지**: 와인/버건디 + 샴페인 골드 + 웜 뉴트럴의 고급스러운 극장 무드를 즉시 무너뜨림
 - **단일 버건디로 모든 UI 칠하기 금지**: 헤더·카드·배지를 전부 `#6E182B`로 채우면 무겁고 답답해짐 — 화이트 캔버스 75%+, 웜 뉴트럴 15%, 와인/골드 10% 이내 비율 유지
 - **보라/네온 그라데이션 남용 금지**: 원본 TimeTicket의 AI 요약 카드 같은 무지개/라벤더 그라데이션을 넣지 말고 솔리드 컬러 블록 유지
 - **홈 카드에 과도한 텍스트 누적 금지**: 홈/그리드 카드에 정가 취소선·예매처 전체 목록·긴 할인 조건을 다 넣지 말고, 핵심(`[할인율] [최저가] [핵심 배지]`)만 노출 후 상세/비교 화면으로 유도
 - **Editorial Serif 남용 금지**: 카드 제목, 내비게이션, 가격 비교표에는 무조건 `Pretendard Variable`만 사용
-- **순수 블랙(`#000000`) 텍스트·그림자 사용 금지**: 와인 톤이 미세하게 섞인 `#1F1719` 잉크와 `rgba(31,23,25,...)` 그림자로 통일
+- **순수 블랙 텍스트·그림자 사용 금지**: 와인 톤이 미세하게 섞인 `#1F1719` 잉크와 `rgba(31,23,25,...)` 그림자로 통일
 
 ---
 
@@ -354,8 +369,8 @@ Root font-size는 `16px` (`html { font-size: 16px }`), 기본 본문은 `0.875re
 | Name | Width | Shell / Gutter | Grid & Navigation Changes |
 |---|---|---|---|
 | **Mobile (xs/sm)** | `< 640px` | `100%`, 좌우 패딩 `20px` | 상단 `52px` 미니 GNB + 하단 `56px` 고정 탭바; 5열 퀵 카테고리 아이콘; 히어로 `calc(100% - 60px)` 슬라이드 + 우상단 카운터 필; 가로 레일 `3.2`열(`gap: 10px`); 기본 그리드 `2`열(`gap: 20px 12px`); 검색/리스트는 단일 열 가로형 리스트 카드(`104px` 5:7 포스터) 전환 가능 |
-| **Tablet (md)** | `640px–1023px` | `100%`, 좌우 패딩 `24px` | 상단 1단 검색 포함 헤더; 히어로 `2`열; 기본 그리드 `3`열; PDP는 단일 컬럼 스택 + 하단 고정 `buy-bar` 유지 |
-| **Desktop Compact (lg)** | `1024px–1199px` | `100%` (`padding: 0 24px`) | 2단 데스크톱 헤더 전환; 히어로 `3`열; 랭킹/카테고리 `4`열; PDP 좌우 스플릿 활성화 (`1fr + 340px` 스티키) |
+| **Tablet (md)** | `640px–1023px` | `100%`, 좌우 패딩 `24px` | 상단 `60px` 슬림 1단 헤더(`🔍 검색` · `MY` 아이콘 분리); 히어로 `2`열; 기본 그리드 `3`열; PDP는 단일 컬럼 스택 + 하단 고정 `buy-bar` 유지 |
+| **Desktop Compact (lg)** | `1024px–1199px` | `100%` (`padding: 0 24px`) | 상단 `68px` 슬림 1단 헤더; 히어로 `3`열; 랭킹/카테고리 `4`열; PDP 좌우 스플릿 활성화 (`1fr + 340px` 스티키) |
 | **Desktop Standard (xl)** | `1200px+` | `1100px` (`68.75rem`) 중앙 고정 | 풀 스펙 적용: 6열 마감임박 레일, 5열 랭킹/장르 그리드, 4열 검색 결과, `670px + 30px + 400px` PDP 스플릿 |
 
 ### Touch Targets & Mobile Ergonomics
@@ -374,41 +389,42 @@ Root font-size는 `16px` (`html { font-size: 16px }`), 기본 본문은 `0.875re
 
 ## 9. Agent Prompt Guide
 
-### Quick Color Reference
+### Quick Color Reference (핵심 16토큰 — 와인·골드·웜 뉴트럴 통일)
 
 - **Brand Anchor / Active Tab**: Velvet Burgundy (`#6E182B`)
 - **Primary CTA / Discount %**: Wine Accent (`#8A1E37`) · Hover (`#72162C`)
-- **Dark Spotlight Band**: Curtain Noir (`#2B0D16`) · Inner Surface: Mulberry (`#4A1525`)
-- **Soft Active Tint**: Rosé Mist (`#F9ECEF`) · Border (`#E6C4CC`)
-- **Ceremony / Lottery / Star / #1 Lowest**: Champagne Gold (`#B89352`) · Soft (`#DFC89F`) · Wash (`#FAF6EE`)
-- **Urgent Timesale / D-Day**: Ruby Urgent (`#A81B3A`) on Ruby Soft (`#FBE9ED`)
+- **Dark Spotlight Band / Ticket Open**: Curtain Noir (`#2B0D16`) · Inner / Badge: Mulberry (`#4A1525`)
+- **Soft Active Tint / Unconditional / Community**: Rosé Mist (`#F9ECEF`) · Border (`#E6C4CC`)
+- **Ceremony / Lottery / Perk / #1 Lowest**: Champagne Gold (`#B89352`) · Soft (`#DFC89F`) · Wash (`#FAF6EE`)
+- **Urgent Timesale / Error**: Ruby Urgent (`#9E1B32`) on `#FBECEF`
 - **Page Canvas**: Pure White (`#FFFFFF`)
-- **Warm Neutral Surfaces**: Porcelain (`#FCF8F7`) / Sunken Blush (`#F6EFEF`) / Sunken Deep (`#EFE5E6`)
+- **Warm Neutral Surfaces**: Porcelain (`#FCF8F7`) / Sunken Blush (`#F6EFEF`) / Sunken Deep (`#EFE5E6`) / Backdrop (`#F6F4F4`)
 - **Borders**: Default (`#EAE0E1`) / Strong (`#D2C5C7`)
 - **Text**: Primary Ink (`#1F1719`) / Secondary (`#534649`) / Muted (`#736468`) / Hint & Strikethrough (`#B3A6A9`)
+- **Strict Exclusion**: 초록(Green)·황토갈색(Ochre/Brown)·생파랑(Blue/Indigo) 미사용
 
 ### Example Component Prompts
 
-1. **Global Two-Tier Header**:
-   > "Build MuDeal's desktop two-tier header (`158px` total height, `#FFFFFF` background, `--md-e1` shadow) centered at `1100px` max-width. Top row: Velvet Burgundy (`#6E182B`) wordmark on the left, a `340px × 44px` full-pill search input (`#FCF8F7` bg, `#B3A6A9` placeholder '뮤지컬, 공연장, 할인 이벤트 검색', focus ring `1.5px #8A1E37`), and right utility icon-label buttons (`찜`, `로그인`). Second row (`68px` height): today's calendar icon badge (`#6E182B` top bar) + primary nav links (`홈`, `대극장`, `대학로`, `로터리·특가`, `할인 캘린더`) in Pretendard `18px/600` (`#534649`, active `#1F1719` with `3px #6E182B` bottom bar), and right-aligned `타임세일` pill (`#A81B3A` text on `#FBE9ED` hover bg) + `최저가 랭킹`."
+1. **Global Single-Tier Slim Header (No Inline Search Bar)**:
+   > "Build MuDeal's slim single-tier desktop header (`68px` height, `#FFFFFF` background, `1px solid #EAE0E1` bottom border, `--md-e1` shadow) centered at `1100px` max-width. Do NOT place an inline search input in the header. Left: Velvet Burgundy (`#6E182B`) 'MuDeal' wordmark. Center: 5 clean nav links (`홈`, `티켓오픈 임박`, `제보해주신 딜`, `로터리·특가`, `싱어롱·특전` — no '검색' tab) in Pretendard `15px/600` (`#534649`, active `#1F1719` with `2.5px #6E182B` bottom indicator). Right: 3 compact pill buttons (`🔍 검색` in `#FCF8F7` with `1px solid #EAE0E1`, `할인 제보` outlined `#EAE0E1`, and `MY` with unread badge `#8A1E37` on `#F9ECEF`)."
 
 2. **5:7 Musical Deal Card (Home Grid & Rail)**:
-   > "Create a MuDeal 5:7 musical ticket card with no outer card box/border on a `#FFFFFF` canvas. Poster: `aspect-ratio: 5/7`, `8px` radius, `#F6EFEF` fallback, `inset 0 0 0 1px rgba(31,23,25,0.06)` hairline, subtle `scale(1.04)` hover zoom, top-right `28px` wishlist heart (`rgba(31,23,25,0.24)` fill, `#8A1E37` active). Below poster (`12px` top gap): muted metadata row (`서울 | 4개 예매처` left, venue right in `13px #736468`), 2-line clamped show title (`15px/500 #1F1719`), price row (`45%` in `#8A1E37 700` + `66,000원~` in `#1F1719 700`, `tabular-nums`) paired with a `12px` pill badge (`로터리` gold outline `#B89352` or `타임세일` `#FBE9ED/#A81B3A`), and a social/rating line with Champagne Gold (`#B89352`) star icon."
+   > "Create a MuDeal 5:7 musical ticket card with no outer card box/border on a `#FFFFFF` canvas. Poster: `aspect-ratio: 5/7`, `8px` radius, `#F6EFEF` fallback, `inset 0 0 0 1px rgba(31,23,25,0.06)` hairline, subtle `scale(1.04)` hover zoom, top-right `28px` wishlist heart (`rgba(31,23,25,0.24)` fill, `#8A1E37` active). Below poster (`12px` top gap): muted metadata row (`서울·대학로 | 4곳 비교` left, venue right in `13px #736468`), 2-line clamped show title (`15px/500 #1F1719`), price row (`45%` in `#8A1E37 700` + `66,000원~` in `#1F1719 700`, `tabular-nums`) paired with a `12px` pill badge (`로터리`/`특전` `#B89352` on `#FAF6EE`, `티켓오픈` `#FFFFFF` on `#4A1525`, or `타임세일` `#9E1B32` on `#FBECEF`), and an optional signal row (`D-2 마감` or community credit `○○님 제보 · 128명 확인`)."
 
 3. **Search Price-Comparison Panel (Core MuDeal Feature)**:
-   > "Build a MuDeal price-comparison card (`#FFFFFF` bg, `1px solid #EAE0E1`, `12px` radius). Top: seat-grade tab bar (`VIP`, `R석`, `S석`, `A석`) with `2px solid #6E182B` active underline + right-aligned `무조건 할인만` toggle switch. Below tabs: a `#F6EFEF` lowest-price summary box (`16px` padding, `10px` radius) showing general lowest price vs lottery/conditional lowest price with `#B3A6A9` strikethrough original price (`13px`), `#8A1E37` discount % (`20px/700`), and `#1F1719` final price (`20px/700`, `tabular-nums`). Underneath: stacked channel rows (`유니켓`, `L티켓`, `NOL 로터리`, `Yes24`) separated by `1px solid #F2ECEC`. Highlight the #1 lowest row with a `3px solid #B89352` left accent, `#FAF6EE` wash, and Champagne Gold `최저가` badge. Each row shows channel name, condition badge (`무조건` `#EBF5EE/#266D45` or `추첨/조건` `#FBF2E2/#8C6214`), fee info (`12px #736468`), tabular price, and a `예매처 이동 ↗` button (`#8A1E37` for #1, outlined `#EAE0E1` for others)."
+   > "Build a MuDeal price-comparison card (`#FFFFFF` bg, `1px solid #EAE0E1`, `12px` radius). Top: seat-grade tab bar (`VIP`, `R석`, `S석`, `A석`) with `2px solid #6E182B` active underline + right-aligned `무조건 할인만` toggle switch. Below tabs: a `#F6EFEF` lowest-price summary box (`16px` padding, `10px` radius) showing general lowest price vs lottery/conditional lowest price with `#B3A6A9` strikethrough original price (`13px`), `#8A1E37` discount % (`20px/700`), and `#1F1719` final price (`20px/700`, `tabular-nums`). Underneath: stacked channel rows (`NOL티켓`, `엘티켓`, `YES24티켓`, `티켓링크`) separated by `1px solid #F2ECEC`. Highlight the #1 lowest row with a `3px solid #B89352` left accent, `#FAF6EE` wash, and Champagne Gold `최저가` badge. Each row shows channel name, condition badge (`무조건` `#6E182B` on `#F9ECEF` or `추첨/조건` `#534649` on `#F6EFEF`), fee info (`12px #736468`), tabular price, and a `예매처 이동 ↗` button (`#8A1E37` for #1, outlined `#EAE0E1` for others)."
 
 4. **Curtain Noir Spotlight Band (Yes24데이 · NOL 로터리)**:
-   > "Design a full-width dark theater feature band in Curtain Noir (`#2B0D16`) with an `1100px` inner container (`48px` vertical padding). Left column (60%): Champagne Gold (`#DFC89F`) uppercase eyebrow label (`TODAY'S LOTTERY & SECRET DEAL`), an Editorial Serif (`Noto Serif KR`) headline in `28px/700 #FFFFFF`, secondary body copy in `rgba(255,255,255,0.74)`, and a CTA row with a white-filled `#6E182B`-text full-pill primary button (`오늘의 특가 보기`) and a white-outlined secondary pill (`알림 설정`). Right column (40%): Mulberry (`#4A1525`) showcase card with `12px` radius displaying 2 featured 5:7 posters and a live `D-Day` countdown in `tabular-nums`."
+   > "Design a full-width dark theater feature band in Curtain Noir (`#2B0D16`) with an `1100px` inner container (`48px` vertical padding). Left column (60%): Champagne Gold (`#DFC89F`) uppercase eyebrow label (`TODAY'S LOTTERY & SECRET DEAL`), an Editorial Serif (`Noto Serif KR`) headline in `28px/700 #FFFFFF`, secondary body copy in `rgba(255,255,255,0.74)`, and a CTA row with a white-filled `#6E182B`-text full-pill primary button (`오늘의 특가 보기`) and a white-outlined secondary pill (`티켓오픈 임박 보기`). Right column (40%): Mulberry (`#4A1525`) showcase card with `12px` radius displaying 2 featured 5:7 posters and a live `D-Day` countdown in `tabular-nums`."
 
 5. **Search & Category Filter Bar + Modal**:
-   > "Create a clean listing header (`1100px` shell) with left title (`22px/600 #1F1719`) and right-aligned `36px` full-pill filter chips (`좌석등급`, `할인유형`, `예매처`, `지역`) in `#FFFFFF` with `1px solid #EAE0E1` (`#F9ECEF` bg + `#8A1E37` border + `#6E182B` text when active) plus a sort dropdown (`최저가순`, `할인율순`, `마감임박순`, `인기순`) in a `12px`-radius menu (`#FFFFFF`, `--md-e2` shadow, `#6E182B` checkmark). Clicking a filter opens a `480px` desktop modal (`20px` radius, `blur(2px)` dim backdrop) or mobile bottom sheet with `24px`-radius option chips (`#F6EFEF` default, `#8A1E37` selected) and a full-width `#8A1E37` `적용하기` button (`50px` height, `--md-shadow-cta`)."
+   > "Create a clean listing header (`1100px` shell) with left title (`22px/600 #1F1719`) and right-aligned `36px` full-pill filter chips (`날짜/기간`, `가격대`, `지역`, `할인유형`) in `#FFFFFF` with `1px solid #EAE0E1` (`#F9ECEF` bg + `#8A1E37` border + `#6E182B` text when active) plus a sort dropdown (`최저가순`, `할인율순`, `마감임박순`, `인기순`) in a `12px`-radius menu (`#FFFFFF`, `--md-e2` shadow, `#6E182B` checkmark). Clicking a filter opens a `480px` desktop modal (`20px` radius, `blur(2px)` dim backdrop) or mobile bottom sheet with `24px`-radius option chips (`#F6EFEF` default, `#8A1E37` selected) and a full-width `#8A1E37` `적용하기` button (`50px` height, `--md-shadow-cta`)."
 
 6. **Product Detail Page (PDP) Split Layout**:
-   > "Build a MuDeal show detail page on a `#F6F4F4` outer backdrop framing an `1100px` layout: left `670px` white column and right `400px` sticky sidebar (`top: 20px`, `12px` radius, `1px solid #EAE0E1`). Left top features a `700:320` blurred-poster hero (`filter: blur(14px) brightness(0.65)`) with a crisp foreground 5:7 poster and a bottom-right split badge (`#A81B3A` label + `#F6EFEF` timer). Stack sections below separated by `8px solid #F1ECEC` bands: show summary with `44px` square wish/share buttons, full channel price comparison table, discount condition guide, historical discount timeline, and venue info. Collapse to single column below `1024px` with a fixed bottom mobile CTA bar (`#FFFFFF`, `1px solid #EAE0E1`, wish/share icons + full-width `#8A1E37` `50px` CTA)."
+   > "Build a MuDeal show detail page on a `#F6F4F4` outer backdrop framing an `1100px` layout: left `670px` white column and right `400px` sticky sidebar (`top: 20px`, `12px` radius, `1px solid #EAE0E1`). Left top features a `700:320` blurred-poster hero (`filter: blur(14px) brightness(0.65)`) with a crisp foreground 5:7 poster and a bottom-right split badge (`#9E1B32` label + `#F6EFEF` timer). Stack sections below separated by `8px solid #F1ECEC` bands: show summary with `44px` square wish/share buttons, full channel price comparison table, stage event & goods perk guide, cast list with actor follow pills, and clickable venue info. Collapse to single column below `1024px` with a fixed bottom mobile CTA bar (`#FFFFFF`, `1px solid #EAE0E1`, wish/share icons + full-width `#8A1E37` `50px` CTA)."
 
-7. **Two-Tier Footer**:
-   > "Build a two-tier desktop footer bordered top by `1px solid #EAE0E1`. Upper section (`#FFFFFF` bg, `40px` vertical padding, `1100px` shell) splits `1.3fr 2fr`: Velvet Burgundy (`#6E182B`) wordmark + service description/contact on the left, and 3 link columns (`SERVICE`, `POLICY`, `PARTNER`) with `1px solid #EAE0E1` left dividers (`12px/700` uppercase tracked `0.12em` headers + `13px #534649` links) on the right. Lower legal bar sits on Porcelain (`#FCF8F7`, `28px` vertical padding) with `#736468` disclaimer text noting real-time price sync with external ticketing platforms."
+7. **Ultra-Slim Mini Footer (1–2 Lines)**:
+   > "Build an ultra-slim single-row footer (`#FCF8F7` bg, `1px solid #EAE0E1` top border, `20px` vertical padding, `1100px` centered shell). Do NOT include multi-column link trees (`SERVICE`/`POLICY`/`DATA SOURCE`) or large legal blocks. Left: compact `12px #736468` disclaimer text ('MuDeal · 외부 예매처 할인·이벤트 비교 서비스 · 자체 결제 및 발권 미제공 · KOPIS 공공데이터 활용'). Right: subtle `12px #B3A6A9` copyright ('© 2026 MuDeal')."
 
 ### Iteration Guide
 
@@ -416,7 +432,7 @@ Root font-size는 `16px` (`html { font-size: 16px }`), 기본 본문은 `0.875re
 2. 컬러 지시 시 추상적 표현("빨간색", "어두운 색") 대신 반드시 **토큰명과 Hex 코드**(`Velvet Burgundy #6E182B`, `Wine Accent #8A1E37`, `Curtain Noir #2B0D16`, `Porcelain #FCF8F7`)를 병기합니다.
 3. 와인/버건디 비중이 과도해 보이지 않도록 **화이트 캔버스(`#FFFFFF`) 여백과 웜 뉴트럴(`#F6EFEF`/`#EAE0E1`)의 비율**을 먼저 점검합니다.
 4. 모든 가격·할인율·날짜·랭킹 영역에 `tabular-nums`가 빠지지 않았는지 확인합니다.
-5. `Champagne Gold(#B89352)`가 로터리/최저가/별점 외의 일반 UI에 새어 나가지 않도록 점검합니다.
+5. `Champagne Gold(#B89352)`가 로터리/최저가/특전 외의 일반 UI에 새어 나가지 않도록, 그리고 초록·황토·생파랑이 섞여 들지 않도록 점검합니다.
 
 ### Known Gaps
 

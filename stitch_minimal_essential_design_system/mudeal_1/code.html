@@ -1,0 +1,645 @@
+<!DOCTYPE html><html lang="ko"><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MuDeal — 전국 뮤지컬 할인·로터리·특전 비교</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script id="tailwind-config">/** @type {import('tailwindcss').Config} */
+globalThis.tailwind = globalThis.tailwind || {};
+globalThis.tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        'primary': '#6E182B',
+        'on-primary': '#FFFFFF',
+        'secondary': '#8A1E37',
+        'on-secondary': '#FFFFFF',
+        'secondary-hover': '#72162C',
+        'curtain-noir': '#2B0D16',
+        'on-curtain-noir': '#FFFFFF',
+        'mulberry': '#4A1525',
+        'rose-mist': '#F9ECEF',
+        'champagne-gold': '#B89352',
+        'gold-wash': '#FAF6EE',
+        'surface': '#FFFFFF',
+        'on-surface': '#1F1719',
+        'surface-variant': '#FCF8F7',
+        'on-surface-variant': '#534649',
+        'surface-sunken': '#F6EFEF',
+        'outline': '#EAE0E1',
+        'outline-strong': '#D2C5C7',
+        'muted': '#736468',
+        'hint': '#B3A6A9',
+        'danger': '#9E2A3B',
+        'on-danger': '#FFFFFF',
+      },
+      borderRadius: {
+        'xs': '4px',
+        'DEFAULT': '8px',
+        'sm': '8px',
+        'md': '10px',
+        'lg': '12px',
+        'xl': '20px',
+        'full': '9999px',
+      },
+      spacing: {
+        'space-1': '4px',
+        'space-2': '8px',
+        'space-3': '12px',
+        'space-4': '16px',
+        'space-5': '20px',
+        'space-6': '24px',
+        'space-7': '32px',
+        'space-8': '40px',
+        'space-9': '56px',
+        'space-10': '72px',
+        'shell-max': '1100px',
+      },
+      fontFamily: {
+        'display': ['"Noto Serif KR"', 'sans-serif'],
+        'headline': ['"Noto Sans KR"', 'sans-serif'],
+        'title': ['"Noto Sans KR"', 'sans-serif'],
+        'body': ['"Noto Sans KR"', 'sans-serif'],
+        'label': ['"Noto Sans KR"', 'sans-serif'],
+      },
+      fontSize: {
+        'display-lg': ['36px', { lineHeight: '44px', letterSpacing: '-0.9px', fontWeight: '700' }],
+        'display-lg-mobile': ['28px', { lineHeight: '36px', letterSpacing: '-0.5px', fontWeight: '700' }],
+        'headline-lg': ['24px', { lineHeight: '30px', letterSpacing: '-0.6px', fontWeight: '700' }],
+        'headline-md': ['20px', { lineHeight: '28px', letterSpacing: '-0.4px', fontWeight: '600' }],
+        'title-lg': ['18px', { lineHeight: '24px', letterSpacing: '-0.5px', fontWeight: '700' }],
+        'title-md': ['15px', { lineHeight: '21px', letterSpacing: '-0.15px', fontWeight: '600' }],
+        'body-lg': ['15px', { lineHeight: '22px', letterSpacing: '-0.15px', fontWeight: '400' }],
+        'body-md': ['14px', { lineHeight: '21px', letterSpacing: '0px', fontWeight: '400' }],
+        'body-sm': ['13px', { lineHeight: '19px', letterSpacing: '0px', fontWeight: '400' }],
+        'label-lg': ['15px', { lineHeight: '20px', letterSpacing: '-0.15px', fontWeight: '600' }],
+        'label-md': ['13px', { lineHeight: '18px', letterSpacing: '0px', fontWeight: '600' }],
+        'label-sm': ['12px', { lineHeight: '16px', letterSpacing: '0px', fontWeight: '600' }],
+      },
+      transitionDuration: {
+        'state-change': '180ms',
+        'poster-zoom': '200ms',
+        'image-fade': '250ms',
+      },
+      transitionDelay: {
+        'state-change': '0ms',
+        'poster-zoom': '0ms',
+        'image-fade': '0ms',
+      },
+      transitionTimingFunction: {
+        'state-change': 'cubic-bezier(0.4, 0, 0.2, 1)',
+        'poster-zoom': 'cubic-bezier(0.4, 0, 0.2, 1)',
+        'image-fade': 'ease-in',
+      },
+    },
+  },
+};
+if (typeof module !== 'undefined') module.exports = globalThis.tailwind.config;
+</script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&amp;family=Noto+Serif+KR:wght@600;700&amp;display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=block" rel="stylesheet">
+  <style>
+    .material-symbols-outlined {
+      display: inline-block;
+      width: 1em;
+      height: 1em;
+      line-height: 1 !important;
+      box-sizing: content-box;
+      overflow: hidden;
+      white-space: nowrap;
+      direction: ltr;
+      vertical-align: middle;
+    }
+    .hero-scrim {
+      background: linear-gradient(180deg, rgba(31, 23, 25, 0) 20%, rgba(31, 23, 25, 0.56) 54%, rgba(43, 13, 22, 0.92) 100%);
+    }
+  </style>
+</head>
+<body class="bg-surface text-on-surface font-body min-h-[1024px] antialiased" data-stitch-vh="min-h-[1024px]===min-h-screen">
+
+  <!-- 1. Global Two-Tier Header -->
+  <header class="bg-surface border-b border-outline shadow-[0_0_0_1px_rgba(31,23,25,0.03),0_1px_2px_rgba(31,23,25,0.04)] sticky top-0 z-30">
+    <div class="max-w-shell-max mx-auto px-space-5 lg:px-0">
+      <!-- Tier 1: Brand + Search + Utilities -->
+      <div class="flex flex-wrap items-center justify-between gap-space-4 pt-space-5 pb-space-3">
+        <a href="#" class="flex items-baseline gap-space-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+          <span data-design-text-token="headline-lg" class="font-headline text-headline-lg text-primary tracking-tight">MuDeal</span>
+          <span data-design-text-token="label-sm" class="font-label text-label-sm text-muted hidden sm:inline">뮤지컬 할인 비교</span>
+        </a>
+
+        <!-- Search Input -->
+        <form action="../search/Search.html" class="flex-1 max-w-md min-w-60">
+          <label for="global-search" class="sr-only">작품명, 뮤지컬 배우, 공연장 검색</label>
+          <div class="relative flex items-center">
+            <span class="material-symbols-outlined text-muted absolute left-space-3 pointer-events-none" aria-hidden="true">search</span>
+            <input id="global-search" type="search" placeholder="작품명 · 뮤지컬 배우 · 공연장 검색" class="w-full h-10 pl-space-8 pr-space-4 rounded-sm bg-surface-variant border border-outline text-body-md text-on-surface placeholder:text-hint focus:bg-surface focus:border-secondary focus:ring-0 transition-colors duration-state-change ease-state-change">
+          </div>
+        </form>
+
+        <!-- Utility Actions -->
+        <div class="flex items-center gap-space-3">
+          <a href="../report/ReportNew.html" data-component-id="button-secondary" data-component-type="button" data-component-variant="secondary" class="inline-flex items-center gap-space-1 h-10 px-space-3 rounded-sm bg-surface border border-outline text-on-surface-variant hover:bg-surface-variant hover:text-primary transition-colors duration-state-change">
+            <span class="material-symbols-outlined text-lg" aria-hidden="true">edit_note</span>
+            <span data-design-text-token="label-md" class="font-label text-label-md">할인 제보</span>
+          </a>
+          <a href="../my/MyPage.html" class="inline-flex items-center gap-space-2 h-10 px-space-3 rounded-sm bg-rose-mist text-primary hover:bg-surface-sunken transition-colors duration-state-change">
+            <span class="material-symbols-outlined text-lg" aria-hidden="true">person</span>
+            <span data-design-text-token="label-md" class="font-label text-label-md">MY</span>
+            <span data-design-text-token="label-sm" class="px-space-1 py-0 rounded-xs bg-primary text-on-primary font-label text-label-sm tabular-nums">3</span>
+          </a>
+        </div>
+      </div>
+
+      <!-- Tier 2: Category Navigation -->
+      <nav aria-label="메인 내비게이션" class="flex items-center justify-between gap-space-4 overflow-x-auto">
+        <div class="flex items-center gap-space-6">
+          <a href="#" class="h-12 inline-flex items-center border-b-4 border-primary text-on-surface whitespace-nowrap">
+            <span data-design-text-token="title-md" class="font-title text-title-md">홈</span>
+          </a>
+          <a href="#ticket-open" class="h-12 inline-flex items-center border-b-4 border-transparent text-on-surface-variant hover:text-on-surface whitespace-nowrap transition-colors duration-state-change">
+            <span data-design-text-token="title-md" class="font-title text-title-md">티켓오픈 임박</span>
+          </a>
+          <a href="#community-deals" class="h-12 inline-flex items-center border-b-4 border-transparent text-on-surface-variant hover:text-on-surface whitespace-nowrap transition-colors duration-state-change">
+            <span data-design-text-token="title-md" class="font-title text-title-md">제보해주신 딜</span>
+          </a>
+          <a href="#spotlight" class="h-12 inline-flex items-center border-b-4 border-transparent text-on-surface-variant hover:text-on-surface whitespace-nowrap transition-colors duration-state-change">
+            <span data-design-text-token="title-md" class="font-title text-title-md">로터리·특가</span>
+          </a>
+          <a href="#all-deals" class="h-12 inline-flex items-center border-b-4 border-transparent text-on-surface-variant hover:text-on-surface whitespace-nowrap transition-colors duration-state-change">
+            <span data-design-text-token="title-md" class="font-title text-title-md">싱어롱·특전</span>
+          </a>
+        </div>
+        <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted hidden md:inline whitespace-nowrap tabular-nums">11.25 (수) KST 기준</span>
+      </nav>
+    </div>
+  </header>
+
+  <main class="pb-space-10">
+
+    <!-- 3. 3-Column Square Hero Spotlight -->
+    <section class="max-w-shell-max mx-auto px-space-5 lg:px-0 pt-space-7">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-space-5">
+        <a href="#spotlight" class="group relative aspect-square rounded-lg overflow-hidden bg-curtain-noir block">
+          <img src="https://lh3.googleusercontent.com/aida/ALJJyrBxhFZpUOdvGcB2ttInRiH7_kFl0dXFmEfoM18lLi4t_vfSjDfm2fXLiMVbOIPpixI4x7IYd1pNhxYls2LTU8Q0ksQQSRgaf_gYHHrIIIbePcextwEccgtThztpvIeTRCBKR_L5xW1neubbbgBGTDEN3b9EkvvwJ_xlQbaq_TuWnWzwB1q5GOlD5k9crzpsqJln3b5bAJF2RBUYqXWlojwP-K8sPseKRPSRRuSp8kIqL15WoCNWOHAgxpo7-w" alt="대극장 주말 타임세일 스포트라이트" class="w-full h-full object-cover transition-transform duration-poster-zoom ease-state-change group-hover:scale-105">
+          <div class="hero-scrim absolute inset-0"></div>
+          <div class="absolute bottom-0 left-0 right-0 p-space-5 flex flex-col gap-space-1">
+            <span data-design-text-token="label-sm" class="font-label text-label-sm text-gold-wash">WEEKEND TIMEDEAL</span>
+            <h2 data-design-text-token="headline-md" class="font-headline text-headline-md text-on-curtain-noir text-balance">대극장 VIP석 최대 45% 비교</h2>
+            <p data-design-text-token="body-sm" class="font-body text-body-sm text-on-curtain-noir/85">NOL · YES24 · 엘티켓 실시간 최저가</p>
+          </div>
+        </a>
+
+        <a href="#spotlight" class="group relative aspect-square rounded-lg overflow-hidden bg-curtain-noir block">
+          <img src="https://lh3.googleusercontent.com/aida/ALJJyrDLKpmyO8TSKqC2hX57N8sKl9EaGpxrVqLDYbVp6lUzmq0s4DX2vZIc04aBS6MNASi_ujVENMSobMA_DEu_MFMcfN_3JUNESnFGQ_SiOqhsB5NM57RgGsn1WnV7riR7k-7lNOzrULYkn2YjANTlXCoZVCgSUBHDV5l1cQ8_AMeCEXCPqjyXFb94thoWRjmpJ0RCu5yfpCqi7acnJLyDhuiXTBo71In_Luso0mff_V5DkqWehrVOOeP5WTan" alt="오늘의 로터리 티켓 응모 안내" class="w-full h-full object-cover transition-transform duration-poster-zoom ease-state-change group-hover:scale-105">
+          <div class="hero-scrim absolute inset-0"></div>
+          <div class="absolute bottom-0 left-0 right-0 p-space-5 flex flex-col gap-space-1">
+            <span data-design-text-token="label-sm" class="font-label text-label-sm text-gold-wash">LOTTERY &amp; RUSH</span>
+            <h2 data-design-text-token="headline-md" class="font-headline text-headline-md text-on-curtain-noir text-balance">오늘 마감 로터리 티켓 모음</h2>
+            <p data-design-text-token="body-sm" class="font-body text-body-sm text-on-curtain-noir/85">추첨 특가부터 당일 잔여석까지</p>
+          </div>
+        </a>
+
+        <a href="#quick-filter" class="group relative aspect-square rounded-lg overflow-hidden bg-curtain-noir block">
+          <img src="https://lh3.googleusercontent.com/aida/ALJJyrDfQiXjf8xdnevGJe8vXhN-50k99_5E69RsF-v3wnD9ehl16pmdJr-4m94SN73BmTLqLN6-netq74JcoJHdK-sMrWEQqCF-SGGSOKK__TWRliBU_S-cLQQceeFfIC-9lgZxswURQTIJKjqF_XsdCYecURYQrEjC40mvez_L9-NgEXy5KT1tlB2cVC7Gf3d7hZxV3DhvHHLNGbo3xxcjkjvgGm0xN028CtJG0GHq3wESmNImvvjMtg" alt="대학로 5만원 이하 소극장 추천" class="w-full h-full object-cover transition-transform duration-poster-zoom ease-state-change group-hover:scale-105">
+          <div class="hero-scrim absolute inset-0"></div>
+          <div class="absolute bottom-0 left-0 right-0 p-space-5 flex flex-col gap-space-1">
+            <span data-design-text-token="label-sm" class="font-label text-label-sm text-gold-wash">DAEHAKRO CURATION</span>
+            <h2 data-design-text-token="headline-md" class="font-headline text-headline-md text-on-curtain-noir text-balance">대학로 5만원 이하 마티네·재관람</h2>
+            <p data-design-text-token="body-sm" class="font-body text-body-sm text-on-curtain-noir/85">커튼콜·스페셜 티켓 증정 회차 포함</p>
+          </div>
+        </a>
+      </div>
+    </section>
+
+    <!-- 4. 마감임박 특가 (5-Column 5:7 Poster Grid) -->
+    <section class="max-w-shell-max mx-auto px-space-5 lg:px-0 pt-space-10">
+      <div class="flex items-baseline justify-between mb-space-5">
+        <h2 data-design-text-token="headline-md" class="font-headline text-headline-md text-on-surface">마감임박 특가</h2>
+        <a href="#all-deals" class="inline-flex items-center gap-space-1 text-on-surface-variant hover:text-primary transition-colors duration-state-change">
+          <span data-design-text-token="label-md" class="font-label text-label-md">전체보기</span>
+          <span class="material-symbols-outlined text-base" aria-hidden="true">chevron_right</span>
+        </a>
+      </div>
+
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-space-5 items-stretch">
+        <!-- Card 1 -->
+        <a href="../show-detail/ShowDetail.html" data-component-id="card-interactive" data-component-type="card" data-component-variant="interactive" class="group flex flex-col bg-surface h-full">
+          <div class="relative aspect-[5/7] w-full overflow-hidden rounded-sm bg-surface-sunken shadow-[inset_0_0_0_1px_rgba(31,23,25,0.06)]">
+            <img src="https://lh3.googleusercontent.com/aida/ALJJyrCQ-InUMo7JLGK0oUuaxgIYZzieU6_F1_zSerR76sDX670uwL6xWkWFkY_zbqbj3GBbRiMnYZSejnn1gpw70jup6mN6SWxkyfJzksCvH7sjSFSiZG0fs0s3jws04nY_zzuh--QvMK2gjWsSb4UQrMzYgQUR0ARXEIbTmdzCe3Y1GPytGm3PwOajLr_naQfl0XzSTIGoHp8NL4oXSq3q8gK4-eH7xQgf-O-ciGugbe9dhWCJNquHoQrl" alt="뮤지컬 알라딘 포스터" class="w-full h-full object-cover transition-transform duration-poster-zoom ease-state-change group-hover:scale-105">
+          </div>
+          <div class="mt-space-3 flex flex-col gap-space-1 flex-1">
+            <div class="flex items-center justify-between text-body-sm text-muted">
+              <span data-design-text-token="body-sm">서울 · 4곳 비교</span>
+              <span data-design-text-token="body-sm" class="truncate max-w-24">샤롯데씨어터</span>
+            </div>
+            <h3 data-design-text-token="title-md" class="font-title text-title-md text-on-surface line-clamp-2">뮤지컬 &lt;알라딘&gt; 한국 초연</h3>
+            <div class="flex items-baseline gap-space-2 pt-space-1">
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-secondary tabular-nums">45%</span>
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-on-surface tabular-nums">66,000원~</span>
+              <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted line-through tabular-nums">120,000원</span>
+            </div>
+            <div class="flex items-center justify-between gap-space-2 mt-auto pt-space-2 border-t border-outline">
+              <span data-design-text-token="label-sm" class="px-space-2 py-0 rounded-xs bg-gold-wash border border-champagne-gold text-on-surface font-label text-label-sm">로터리</span>
+              <span data-design-text-token="label-sm" class="font-label text-label-sm text-primary tabular-nums">D-0</span>
+            </div>
+          </div>
+        </a>
+
+        <!-- Card 2 -->
+        <a href="../show-detail/ShowDetail.html" data-component-id="card-interactive" data-component-type="card" data-component-variant="interactive" class="group flex flex-col bg-surface h-full">
+          <div class="relative aspect-[5/7] w-full overflow-hidden rounded-sm bg-surface-sunken shadow-[inset_0_0_0_1px_rgba(31,23,25,0.06)]">
+            <img src="https://lh3.googleusercontent.com/aida/ALJJyrBLvSYMN2HyaM1YAOvt6_X8AlwvBEPXeYW9YpnLqEpt3blBW5m6wWEgevsWxG4Mkslx002cznK8OH0NR0m_z8CL2UeJLV4-wlCxDM_o0DjPd2FkmKO6xgoQovzTdxcYYnFhhqSBFZUC4rpeZZcTtIS6AhvCVfbGnXZlqdX2gpjzLowwc7gMVJ2ZYLs5LCxNiNCP9smfeNdQOWHL8rrIu3hXuLCMJ417MaTsaKFcobHPOqMq2Ro-K34" alt="뮤지컬 드라큘라 포스터" class="w-full h-full object-cover transition-transform duration-poster-zoom ease-state-change group-hover:scale-105">
+          </div>
+          <div class="mt-space-3 flex flex-col gap-space-1 flex-1">
+            <div class="flex items-center justify-between text-body-sm text-muted">
+              <span data-design-text-token="body-sm">서울 · 3곳 비교</span>
+              <span data-design-text-token="body-sm" class="truncate max-w-24">블루스퀘어</span>
+            </div>
+            <h3 data-design-text-token="title-md" class="font-title text-title-md text-on-surface line-clamp-2">뮤지컬 &lt;드라큘라&gt; 10주년</h3>
+            <div class="flex items-baseline gap-space-2 pt-space-1">
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-secondary tabular-nums">35%</span>
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-on-surface tabular-nums">78,000원~</span>
+              <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted line-through tabular-nums">120,000원</span>
+            </div>
+            <div class="flex items-center justify-between gap-space-2 mt-auto pt-space-2 border-t border-outline">
+              <span data-design-text-token="label-sm" class="px-space-2 py-0 rounded-xs bg-rose-mist text-primary font-label text-label-sm">무조건 할인</span>
+              <span data-design-text-token="label-sm" class="font-label text-label-sm text-primary tabular-nums">D-1</span>
+            </div>
+          </div>
+        </a>
+
+        <!-- Card 3 -->
+        <a href="../show-detail/ShowDetail.html" data-component-id="card-interactive" data-component-type="card" data-component-variant="interactive" class="group flex flex-col bg-surface h-full">
+          <div class="relative aspect-[5/7] w-full overflow-hidden rounded-sm bg-surface-sunken shadow-[inset_0_0_0_1px_rgba(31,23,25,0.06)]">
+            <img src="https://lh3.googleusercontent.com/aida/ALJJyrCH_tsHL1Bfap-0kiNl0LvUNGtUJwKv_EirTS1ATQ0un0iwA_sLHT0leuLbXxWQZmL_MKdjcM8Zj2FlnV-Hfgh1s6yDGyXp8mPp3f-djG99eGI3KvGUcPTOeMmrFLaI9EvkHQh9sEQLET7CmxNLhtdY_iD5Q7u_crzNXCGS4FGojlMxZGMB7OpHCAxNWOIRI3iEqcF7msc1zeK2r5VZjMOLi0j4Y_XjvWtJdVm8R9B8hUaZgjX9Wd57" alt="뮤지컬 여신님이 보고 계셔 포스터" class="w-full h-full object-cover transition-transform duration-poster-zoom ease-state-change group-hover:scale-105">
+          </div>
+          <div class="mt-space-3 flex flex-col gap-space-1 flex-1">
+            <div class="flex items-center justify-between text-body-sm text-muted">
+              <span data-design-text-token="body-sm">대학로 · 3곳 비교</span>
+              <span data-design-text-token="body-sm" class="truncate max-w-24">예스24스테이지</span>
+            </div>
+            <h3 data-design-text-token="title-md" class="font-title text-title-md text-on-surface line-clamp-2">여신님이 보고 계셔</h3>
+            <div class="flex items-baseline gap-space-2 pt-space-1">
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-secondary tabular-nums">40%</span>
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-on-surface tabular-nums">39,600원~</span>
+              <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted line-through tabular-nums">66,000원</span>
+            </div>
+            <div class="flex items-center justify-between gap-space-2 mt-auto pt-space-2 border-t border-outline">
+              <span data-design-text-token="label-sm" class="px-space-2 py-0 rounded-xs bg-rose-mist text-primary font-label text-label-sm">커튼콜</span>
+              <span data-design-text-token="label-sm" class="font-label text-label-sm text-primary tabular-nums">D-1</span>
+            </div>
+          </div>
+        </a>
+
+        <!-- Card 4 -->
+        <a href="../show-detail/ShowDetail.html" data-component-id="card-interactive" data-component-type="card" data-component-variant="interactive" class="group flex flex-col bg-surface h-full">
+          <div class="relative aspect-[5/7] w-full overflow-hidden rounded-sm bg-surface-sunken shadow-[inset_0_0_0_1px_rgba(31,23,25,0.06)]">
+            <img src="https://lh3.googleusercontent.com/aida/ALJJyrDTbRBUUF07Tmr_BOFkTGPrAJvq6Oq0B66_Fej7WdmNtT9r0Aa4q7mEtTa1WwCzLV28Uk43A1ws9tjB-hmfSZapVcBJZyXETYBDa-0-cd39iI5O2fXPZ-NEU96hUGKx7B67B9vzok6UbcpA75ilgACKPq759IehCmbTAahvVToA4A15qif5zuNFCeQxBUK-MO_OwZ1EA4CZHH6CgAEsz9ZacEhIfW4lZhd7PDtEj6QzV8yx0rffylDT" alt="뮤지컬 오페라의 유령 포스터" class="w-full h-full object-cover transition-transform duration-poster-zoom ease-state-change group-hover:scale-105">
+          </div>
+          <div class="mt-space-3 flex flex-col gap-space-1 flex-1">
+            <div class="flex items-center justify-between text-body-sm text-muted">
+              <span data-design-text-token="body-sm">부산 · 2곳 비교</span>
+              <span data-design-text-token="body-sm" class="truncate max-w-24">드림씨어터</span>
+            </div>
+            <h3 data-design-text-token="title-md" class="font-title text-title-md text-on-surface line-clamp-2">오페라의 유령 부산 투어</h3>
+            <div class="flex items-baseline gap-space-2 pt-space-1">
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-secondary tabular-nums">30%</span>
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-on-surface tabular-nums">84,000원~</span>
+              <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted line-through tabular-nums">120,000원</span>
+            </div>
+            <div class="flex items-center justify-between gap-space-2 mt-auto pt-space-2 border-t border-outline">
+              <span data-design-text-token="label-sm" class="px-space-2 py-0 rounded-xs bg-surface-sunken text-on-surface-variant font-label text-label-sm">조건부 · 마티네</span>
+              <span data-design-text-token="label-sm" class="font-label text-label-sm text-primary tabular-nums">D-2</span>
+            </div>
+          </div>
+        </a>
+
+        <!-- Card 5 -->
+        <a href="../show-detail/ShowDetail.html" data-component-id="card-interactive" data-component-type="card" data-component-variant="interactive" class="group flex flex-col bg-surface h-full">
+          <div class="relative aspect-[5/7] w-full overflow-hidden rounded-sm bg-surface-sunken shadow-[inset_0_0_0_1px_rgba(31,23,25,0.06)]">
+            <img src="https://lh3.googleusercontent.com/aida/ALJJyrCY7eK1St-obsCi8KH8bQ74k_R3FqrI3qm6FhsCBR-tdODQ-2W5TzBdiFRqDze0MMImaBc6mwfSsu_5H2uw-SnhAHXpO_RAAyr1n4-xwT2ahmWDwlpT4hDbAzG4ImXyqnylk40UQKR4XHOII7DCnZVnvEfE1o7vXlSNHEwDvfUDh4-v30xm35SVBtpdWajPlChTP7RFjA_c15acWZbKpF1B6zw-nU564cbAj3pNXXBpZarcBzRMfG8" alt="뮤지컬 빨래 포스터" class="w-full h-full object-cover transition-transform duration-poster-zoom ease-state-change group-hover:scale-105">
+          </div>
+          <div class="mt-space-3 flex flex-col gap-space-1 flex-1">
+            <div class="flex items-center justify-between text-body-sm text-muted">
+              <span data-design-text-token="body-sm">대학로 · 4곳 비교</span>
+              <span data-design-text-token="body-sm" class="truncate max-w-24">유니플렉스</span>
+            </div>
+            <h3 data-design-text-token="title-md" class="font-title text-title-md text-on-surface line-clamp-2">뮤지컬 &lt;빨래&gt; 20주년</h3>
+            <div class="flex items-baseline gap-space-2 pt-space-1">
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-secondary tabular-nums">42%</span>
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-on-surface tabular-nums">34,800원~</span>
+              <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted line-through tabular-nums">60,000원</span>
+            </div>
+            <div class="flex items-center justify-between gap-space-2 mt-auto pt-space-2 border-t border-outline">
+              <span data-design-text-token="label-sm" class="px-space-2 py-0 rounded-xs bg-rose-mist text-primary font-label text-label-sm">무조건 할인</span>
+              <span data-design-text-token="label-sm" class="font-label text-label-sm text-primary tabular-nums">D-2</span>
+            </div>
+          </div>
+        </a>
+      </div>
+    </section>
+
+    <!-- 5. 티켓오픈 임박 (Curtain Noir / Mulberry 태그 — 생파랑 제거) -->
+    <section id="ticket-open" class="max-w-shell-max mx-auto px-space-5 lg:px-0 pt-space-10">
+      <div class="flex items-baseline justify-between mb-space-5">
+        <h2 data-design-text-token="headline-md" class="font-headline text-headline-md text-on-surface">티켓오픈 임박</h2>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-space-5">
+        <div class="p-space-4 rounded-md border border-outline bg-surface flex items-center justify-between gap-space-4 hover:bg-surface-variant transition-colors duration-state-change">
+          <div class="flex flex-col gap-space-1 min-w-0">
+            <div class="flex items-center gap-space-2">
+              <span data-design-text-token="label-sm" class="px-space-2 py-0 rounded-xs bg-curtain-noir text-on-curtain-noir font-label text-label-sm tabular-nums">오늘 14:00</span>
+              <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted">NOL 단독</span>
+            </div>
+            <h3 data-design-text-token="title-md" class="font-title text-title-md text-on-surface truncate">뮤지컬 &lt;지킬앤하이드&gt; 3차 오픈</h3>
+            <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted">샤롯데씨어터 · 조기예매 20%</span>
+          </div>
+          <span class="material-symbols-outlined text-primary shrink-0" aria-hidden="true">notifications_active</span>
+        </div>
+
+        <div class="p-space-4 rounded-md border border-outline bg-surface flex items-center justify-between gap-space-4 hover:bg-surface-variant transition-colors duration-state-change">
+          <div class="flex flex-col gap-space-1 min-w-0">
+            <div class="flex items-center gap-space-2">
+              <span data-design-text-token="label-sm" class="px-space-2 py-0 rounded-xs bg-mulberry text-on-curtain-noir font-label text-label-sm tabular-nums">내일 11:00</span>
+              <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted">YES24 · 티켓링크</span>
+            </div>
+            <h3 data-design-text-token="title-md" class="font-title text-title-md text-on-surface truncate">뮤지컬 &lt;시라노&gt; 마지막 티켓오픈</h3>
+            <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted">예술의전당 · 재관람 25%</span>
+          </div>
+          <span class="material-symbols-outlined text-on-surface-variant shrink-0" aria-hidden="true">calendar_add_on</span>
+        </div>
+
+        <div class="p-space-4 rounded-md border border-outline bg-surface flex items-center justify-between gap-space-4 hover:bg-surface-variant transition-colors duration-state-change">
+          <div class="flex flex-col gap-space-1 min-w-0">
+            <div class="flex items-center gap-space-2">
+              <span data-design-text-token="label-sm" class="px-space-2 py-0 rounded-xs bg-curtain-noir text-on-curtain-noir font-label text-label-sm tabular-nums">11.27 15:00</span>
+              <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted">엘티켓</span>
+            </div>
+            <h3 data-design-text-token="title-md" class="font-title text-title-md text-on-surface truncate">뮤지컬 &lt;마타하리&gt; 프리뷰 오픈</h3>
+            <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted">LG아트센터 · 프리뷰 30%</span>
+          </div>
+          <span class="material-symbols-outlined text-on-surface-variant shrink-0" aria-hidden="true">calendar_add_on</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. 관객들이 제보해주신 딜 (전용 기여 섹션) -->
+    <section id="community-deals" class="max-w-shell-max mx-auto px-space-5 lg:px-0 pt-space-10">
+      <div class="flex flex-wrap items-baseline justify-between gap-space-3 mb-space-5">
+        <h2 data-design-text-token="headline-md" class="font-headline text-headline-md text-on-surface">관객들이 제보해주신 딜</h2>
+        <a href="../report/ReportNew.html" class="inline-flex items-center gap-space-1 text-primary hover:text-secondary transition-colors duration-state-change">
+          <span data-design-text-token="label-md" class="font-label text-label-md">할인 제보하기</span>
+          <span class="material-symbols-outlined text-base" aria-hidden="true">add</span>
+        </a>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-space-5">
+        <!-- Reported Deal 1 -->
+        <article class="p-space-5 rounded-lg border border-outline bg-surface flex flex-col gap-space-3">
+          <div class="flex items-center justify-between gap-space-2">
+            <span data-design-text-token="label-sm" class="px-space-2 py-0 rounded-xs bg-rose-mist text-primary font-label text-label-sm">대학로산책님 제보</span>
+            <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted tabular-nums">128명 확인 · 도움 24</span>
+          </div>
+          <div>
+            <h3 data-design-text-token="title-md" class="font-title text-title-md text-on-surface">뮤지컬 &lt;여신님이 보고 계셔&gt;</h3>
+            <p data-design-text-token="body-sm" class="font-body text-body-sm text-muted mt-space-1">평일 마티네 전석 45% + 스페셜 티켓 증정</p>
+          </div>
+          <div class="flex items-center justify-between pt-space-2 border-t border-outline mt-auto">
+            <div class="flex items-baseline gap-space-2">
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-secondary tabular-nums">45%</span>
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-on-surface tabular-nums">36,300원</span>
+            </div>
+            <button type="button" class="helpful-btn w-28 h-8 px-space-3 rounded-xs bg-surface-variant border border-outline text-on-surface-variant hover:bg-rose-mist hover:text-primary transition-colors duration-state-change inline-flex items-center justify-center gap-space-1">
+              <span class="material-symbols-outlined text-sm" aria-hidden="true">thumb_up</span>
+              <span data-design-text-token="label-sm" class="font-label text-label-sm">도움이 됐어요</span>
+            </button>
+          </div>
+        </article>
+
+        <!-- Reported Deal 2 -->
+        <article class="p-space-5 rounded-lg border border-outline bg-surface flex flex-col gap-space-3">
+          <div class="flex items-center justify-between gap-space-2">
+            <span data-design-text-token="label-sm" class="px-space-2 py-0 rounded-xs bg-rose-mist text-primary font-label text-label-sm">뮤덕10년차님 제보</span>
+            <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted tabular-nums">94명 확인 · 도움 19</span>
+          </div>
+          <div>
+            <h3 data-design-text-token="title-md" class="font-title text-title-md text-on-surface">뮤지컬 &lt;빨래&gt; 직장인 퇴근길 특가</h3>
+            <p data-design-text-token="body-sm" class="font-body text-body-sm text-muted mt-space-1">수요일 19:30 회차 사원증 지참 시 동반 1인 포함</p>
+          </div>
+          <div class="flex items-center justify-between pt-space-2 border-t border-outline mt-auto">
+            <div class="flex items-baseline gap-space-2">
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-secondary tabular-nums">40%</span>
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-on-surface tabular-nums">36,000원</span>
+            </div>
+            <button type="button" class="helpful-btn w-28 h-8 px-space-3 rounded-xs bg-surface-variant border border-outline text-on-surface-variant hover:bg-rose-mist hover:text-primary transition-colors duration-state-change inline-flex items-center justify-center gap-space-1">
+              <span class="material-symbols-outlined text-sm" aria-hidden="true">thumb_up</span>
+              <span data-design-text-token="label-sm" class="font-label text-label-sm">도움이 됐어요</span>
+            </button>
+          </div>
+        </article>
+
+        <!-- Reported Deal 3 -->
+        <article class="p-space-5 rounded-lg border border-outline bg-surface flex flex-col gap-space-3">
+          <div class="flex items-center justify-between gap-space-2">
+            <span data-design-text-token="label-sm" class="px-space-2 py-0 rounded-xs bg-rose-mist text-primary font-label text-label-sm">커튼콜수집가님 제보</span>
+            <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted tabular-nums">215명 확인 · 도움 41</span>
+          </div>
+          <div>
+            <h3 data-design-text-token="title-md" class="font-title text-title-md text-on-surface">뮤지컬 &lt;드라큘라&gt; 커튼콜 데이</h3>
+            <p data-design-text-token="body-sm" class="font-body text-body-sm text-muted mt-space-1">11.29(일) 19:00 회차 커튼콜 촬영 가능 · S석 특가</p>
+          </div>
+          <div class="flex items-center justify-between pt-space-2 border-t border-outline mt-auto">
+            <div class="flex items-baseline gap-space-2">
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-secondary tabular-nums">30%</span>
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-on-surface tabular-nums">77,000원</span>
+            </div>
+            <button type="button" class="helpful-btn w-28 h-8 px-space-3 rounded-xs bg-surface-variant border border-outline text-on-surface-variant hover:bg-rose-mist hover:text-primary transition-colors duration-state-change inline-flex items-center justify-center gap-space-1">
+              <span class="material-symbols-outlined text-sm" aria-hidden="true">thumb_up</span>
+              <span data-design-text-token="label-sm" class="font-label text-label-sm">도움이 됐어요</span>
+            </button>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- 8. 유형 필터 + 전체 할인 공연 그리드 -->
+    <section id="all-deals" class="max-w-shell-max mx-auto px-space-5 lg:px-0 pt-space-10">
+      <div class="flex items-baseline justify-between gap-space-4 border-b border-outline pb-space-3 mb-space-6">
+        <h2 data-design-text-token="headline-md" class="font-headline text-headline-md text-on-surface">지금 비교 가능한 할인 공연</h2>
+        <a href="../search/Search.html" class="inline-flex items-center gap-space-1 text-on-surface-variant hover:text-primary transition-colors duration-state-change">
+          <span data-design-text-token="label-md" class="font-label text-label-md">검색</span>
+          <span class="material-symbols-outlined text-base" aria-hidden="true">chevron_right</span>
+        </a>
+      </div>
+
+      <div id="deal-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-space-5 gap-y-space-8 items-stretch">
+        <a href="../show-detail/ShowDetail.html" data-category="lottery" class="deal-item group flex flex-col bg-surface h-full">
+          <div class="relative aspect-[5/7] w-full overflow-hidden rounded-sm bg-surface-sunken shadow-[inset_0_0_0_1px_rgba(31,23,25,0.06)]">
+            <img src="https://lh3.googleusercontent.com/aida/ALJJyrCQ-InUMo7JLGK0oUuaxgIYZzieU6_F1_zSerR76sDX670uwL6xWkWFkY_zbqbj3GBbRiMnYZSejnn1gpw70jup6mN6SWxkyfJzksCvH7sjSFSiZG0fs0s3jws04nY_zzuh--QvMK2gjWsSb4UQrMzYgQUR0ARXEIbTmdzCe3Y1GPytGm3PwOajLr_naQfl0XzSTIGoHp8NL4oXSq3q8gK4-eH7xQgf-O-ciGugbe9dhWCJNquHoQrl" alt="뮤지컬 알라딘" class="w-full h-full object-cover transition-transform duration-poster-zoom group-hover:scale-105">
+          </div>
+          <div class="mt-space-3 flex flex-col gap-space-1 flex-1">
+            <div class="flex items-center justify-between text-body-sm text-muted">
+              <span data-design-text-token="body-sm">서울 · 4곳 비교</span>
+              <span data-design-text-token="body-sm" class="truncate max-w-24">샤롯데씨어터</span>
+            </div>
+            <h3 data-design-text-token="title-md" class="font-title text-title-md text-on-surface line-clamp-2">뮤지컬 &lt;알라딘&gt;</h3>
+            <div class="flex items-baseline gap-space-2 pt-space-1">
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-secondary tabular-nums">45%</span>
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-on-surface tabular-nums">66,000원~</span>
+              <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted line-through tabular-nums">120,000원</span>
+            </div>
+            <div class="flex items-center justify-between gap-space-2 mt-auto pt-space-2 border-t border-outline">
+              <span data-design-text-token="label-sm" class="px-space-2 py-0 rounded-xs bg-gold-wash border border-champagne-gold text-on-surface font-label text-label-sm">로터리</span>
+              <span data-design-text-token="label-sm" class="font-label text-label-sm text-primary tabular-nums">D-0</span>
+            </div>
+          </div>
+        </a>
+
+        <a href="../show-detail/ShowDetail.html" data-category="timesale" class="deal-item group flex flex-col bg-surface h-full">
+          <div class="relative aspect-[5/7] w-full overflow-hidden rounded-sm bg-surface-sunken shadow-[inset_0_0_0_1px_rgba(31,23,25,0.06)]">
+            <img src="https://lh3.googleusercontent.com/aida/ALJJyrBLvSYMN2HyaM1YAOvt6_X8AlwvBEPXeYW9YpnLqEpt3blBW5m6wWEgevsWxG4Mkslx002cznK8OH0NR0m_z8CL2UeJLV4-wlCxDM_o0DjPd2FkmKO6xgoQovzTdxcYYnFhhqSBFZUC4rpeZZcTtIS6AhvCVfbGnXZlqdX2gpjzLowwc7gMVJ2ZYLs5LCxNiNCP9smfeNdQOWHL8rrIu3hXuLCMJ417MaTsaKFcobHPOqMq2Ro-K34" alt="뮤지컬 드라큘라" class="w-full h-full object-cover transition-transform duration-poster-zoom group-hover:scale-105">
+          </div>
+          <div class="mt-space-3 flex flex-col gap-space-1 flex-1">
+            <div class="flex items-center justify-between text-body-sm text-muted">
+              <span data-design-text-token="body-sm">서울 · 3곳 비교</span>
+              <span data-design-text-token="body-sm" class="truncate max-w-24">블루스퀘어</span>
+            </div>
+            <h3 data-design-text-token="title-md" class="font-title text-title-md text-on-surface line-clamp-2">뮤지컬 &lt;드라큘라&gt;</h3>
+            <div class="flex items-baseline gap-space-2 pt-space-1">
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-secondary tabular-nums">35%</span>
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-on-surface tabular-nums">78,000원~</span>
+              <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted line-through tabular-nums">120,000원</span>
+            </div>
+            <div class="flex items-center justify-between gap-space-2 mt-auto pt-space-2 border-t border-outline">
+              <span data-design-text-token="label-sm" class="px-space-2 py-0 rounded-xs bg-rose-mist text-primary font-label text-label-sm">무조건 할인</span>
+              <span data-design-text-token="label-sm" class="font-label text-label-sm text-primary tabular-nums">D-1</span>
+            </div>
+          </div>
+        </a>
+
+        <a href="../show-detail/ShowDetail.html" data-category="event" class="deal-item group flex flex-col bg-surface h-full">
+          <div class="relative aspect-[5/7] w-full overflow-hidden rounded-sm bg-surface-sunken shadow-[inset_0_0_0_1px_rgba(31,23,25,0.06)]">
+            <img src="https://lh3.googleusercontent.com/aida/ALJJyrCH_tsHL1Bfap-0kiNl0LvUNGtUJwKv_EirTS1ATQ0un0iwA_sLHT0leuLbXxWQZmL_MKdjcM8Zj2FlnV-Hfgh1s6yDGyXp8mPp3f-djG99eGI3KvGUcPTOeMmrFLaI9EvkHQh9sEQLET7CmxNLhtdY_iD5Q7u_crzNXCGS4FGojlMxZGMB7OpHCAxNWOIRI3iEqcF7msc1zeK2r5VZjMOLi0j4Y_XjvWtJdVm8R9B8hUaZgjX9Wd57" alt="여신님이 보고 계셔" class="w-full h-full object-cover transition-transform duration-poster-zoom group-hover:scale-105">
+          </div>
+          <div class="mt-space-3 flex flex-col gap-space-1 flex-1">
+            <div class="flex items-center justify-between text-body-sm text-muted">
+              <span data-design-text-token="body-sm">대학로 · 3곳 비교</span>
+              <span data-design-text-token="body-sm" class="truncate max-w-24">예스24스테이지</span>
+            </div>
+            <h3 data-design-text-token="title-md" class="font-title text-title-md text-on-surface line-clamp-2">여신님이 보고 계셔</h3>
+            <div class="flex items-baseline gap-space-2 pt-space-1">
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-secondary tabular-nums">40%</span>
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-on-surface tabular-nums">39,600원~</span>
+              <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted line-through tabular-nums">66,000원</span>
+            </div>
+            <div class="flex items-center justify-between gap-space-2 mt-auto pt-space-2 border-t border-outline">
+              <span data-design-text-token="label-sm" class="px-space-2 py-0 rounded-xs bg-rose-mist text-primary font-label text-label-sm">커튼콜</span>
+              <span data-design-text-token="label-sm" class="font-label text-label-sm text-primary tabular-nums">D-4</span>
+            </div>
+          </div>
+        </a>
+
+        <a href="../show-detail/ShowDetail.html" data-category="timesale" class="deal-item group flex flex-col bg-surface h-full">
+          <div class="relative aspect-[5/7] w-full overflow-hidden rounded-sm bg-surface-sunken shadow-[inset_0_0_0_1px_rgba(31,23,25,0.06)]">
+            <img src="https://lh3.googleusercontent.com/aida/ALJJyrDTbRBUUF07Tmr_BOFkTGPrAJvq6Oq0B66_Fej7WdmNtT9r0Aa4q7mEtTa1WwCzLV28Uk43A1ws9tjB-hmfSZapVcBJZyXETYBDa-0-cd39iI5O2fXPZ-NEU96hUGKx7B67B9vzok6UbcpA75ilgACKPq759IehCmbTAahvVToA4A15qif5zuNFCeQxBUK-MO_OwZ1EA4CZHH6CgAEsz9ZacEhIfW4lZhd7PDtEj6QzV8yx0rffylDT" alt="오페라의 유령" class="w-full h-full object-cover transition-transform duration-poster-zoom group-hover:scale-105">
+          </div>
+          <div class="mt-space-3 flex flex-col gap-space-1 flex-1">
+            <div class="flex items-center justify-between text-body-sm text-muted">
+              <span data-design-text-token="body-sm">부산 · 2곳 비교</span>
+              <span data-design-text-token="body-sm" class="truncate max-w-24">드림씨어터</span>
+            </div>
+            <h3 data-design-text-token="title-md" class="font-title text-title-md text-on-surface line-clamp-2">오페라의 유령</h3>
+            <div class="flex items-baseline gap-space-2 pt-space-1">
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-secondary tabular-nums">30%</span>
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-on-surface tabular-nums">84,000원~</span>
+              <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted line-through tabular-nums">120,000원</span>
+            </div>
+            <div class="flex items-center justify-between gap-space-2 mt-auto pt-space-2 border-t border-outline">
+              <span data-design-text-token="label-sm" class="px-space-2 py-0 rounded-xs bg-surface-sunken text-on-surface-variant font-label text-label-sm">조건부 할인</span>
+              <span data-design-text-token="label-sm" class="font-label text-label-sm text-muted tabular-nums">D-6</span>
+            </div>
+          </div>
+        </a>
+
+        <a href="../show-detail/ShowDetail.html" data-category="perk" class="deal-item group flex flex-col bg-surface h-full">
+          <div class="relative aspect-[5/7] w-full overflow-hidden rounded-sm bg-surface-sunken shadow-[inset_0_0_0_1px_rgba(31,23,25,0.06)]">
+            <img src="https://lh3.googleusercontent.com/aida/ALJJyrCY7eK1St-obsCi8KH8bQ74k_R3FqrI3qm6FhsCBR-tdODQ-2W5TzBdiFRqDze0MMImaBc6mwfSsu_5H2uw-SnhAHXpO_RAAyr1n4-xwT2ahmWDwlpT4hDbAzG4ImXyqnylk40UQKR4XHOII7DCnZVnvEfE1o7vXlSNHEwDvfUDh4-v30xm35SVBtpdWajPlChTP7RFjA_c15acWZbKpF1B6zw-nU564cbAj3pNXXBpZarcBzRMfG8" alt="뮤지컬 빨래" class="w-full h-full object-cover transition-transform duration-poster-zoom group-hover:scale-105">
+          </div>
+          <div class="mt-space-3 flex flex-col gap-space-1 flex-1">
+            <div class="flex items-center justify-between text-body-sm text-muted">
+              <span data-design-text-token="body-sm">대학로 · 4곳 비교</span>
+              <span data-design-text-token="body-sm" class="truncate max-w-24">유니플렉스</span>
+            </div>
+            <h3 data-design-text-token="title-md" class="font-title text-title-md text-on-surface line-clamp-2">뮤지컬 &lt;빨래&gt;</h3>
+            <div class="flex items-baseline gap-space-2 pt-space-1">
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-secondary tabular-nums">42%</span>
+              <span data-design-text-token="title-lg" class="font-title text-title-lg text-on-surface tabular-nums">34,800원~</span>
+              <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted line-through tabular-nums">60,000원</span>
+            </div>
+            <div class="flex items-center justify-between gap-space-2 mt-auto pt-space-2 border-t border-outline">
+              <span data-design-text-token="label-sm" class="px-space-2 py-0 rounded-xs bg-gold-wash border border-champagne-gold text-on-surface font-label text-label-sm">특전</span>
+              <span data-design-text-token="label-sm" class="font-label text-label-sm text-muted tabular-nums">D-9</span>
+            </div>
+          </div>
+        </a>
+      </div>
+
+      <div class="flex justify-center mt-space-8">
+        <button type="button" data-component-id="button-load-more" data-component-type="button" data-component-variant="secondary" class="inline-flex items-center justify-center w-72 h-12 rounded-sm bg-surface text-on-surface-variant border border-outline-strong hover:bg-surface-variant transition-colors duration-state-change">
+          <span data-design-text-token="label-lg" class="font-label text-label-lg">할인 공연 더보기</span>
+        </button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- 9. Ultra-Slim 1-Line Mini Footer -->
+  <footer class="bg-surface-variant border-t border-outline py-space-5">
+    <div class="max-w-shell-max mx-auto px-space-5 lg:px-0 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-space-2">
+      <p data-design-text-token="body-sm" class="font-body text-body-sm text-muted">
+        MuDeal · 외부 예매처 할인·이벤트 비교 서비스 (자체 결제·발권 미제공 · KOPIS 공공데이터 활용)
+      </p>
+      <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted tabular-nums">© 2026 MuDeal</span>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      const tabs = document.querySelectorAll('.deal-tab');
+      const items = document.querySelectorAll('.deal-item');
+      tabs.forEach((tab) => {
+        tab.addEventListener('click', () => {
+          const filter = tab.getAttribute('data-filter');
+          tabs.forEach((t) => {
+            t.setAttribute('aria-selected', 'false');
+            t.className = 'deal-tab h-8 px-space-3 rounded-xs bg-surface border border-outline text-on-surface-variant hover:bg-surface-variant font-label text-label-md transition-colors duration-state-change';
+          });
+          tab.setAttribute('aria-selected', 'true');
+          tab.className = 'deal-tab h-8 px-space-3 rounded-xs bg-primary text-on-primary font-label text-label-md transition-colors duration-state-change';
+          items.forEach((item) => {
+            const cat = item.getAttribute('data-category');
+            item.style.display = (filter === 'all' || cat === filter) ? 'flex' : 'none';
+          });
+        });
+      });
+
+      document.querySelectorAll('.helpful-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const active = btn.getAttribute('aria-pressed') === 'true';
+          btn.setAttribute('aria-pressed', String(!active));
+          const label = btn.querySelector('span[data-design-text-token="label-sm"]');
+          if (!active) {
+            btn.className = 'helpful-btn w-28 h-8 px-space-3 rounded-xs bg-rose-mist border border-secondary text-primary transition-colors duration-state-change inline-flex items-center justify-center gap-space-1';
+            label.textContent = '도움 완료 ✓';
+          } else {
+            btn.className = 'helpful-btn w-28 h-8 px-space-3 rounded-xs bg-surface-variant border border-outline text-on-surface-variant hover:bg-rose-mist hover:text-primary transition-colors duration-state-change inline-flex items-center justify-center gap-space-1';
+            label.textContent = '도움이 됐어요';
+          }
+        });
+      });
+    })();
+  </script>
+
+
+</body></html>

@@ -1,0 +1,37 @@
+import { and, eq, sql } from "drizzle-orm";
+import { z } from "zod";
+import { getRuntimeDb } from "@/db/client";
+import { userNotifications } from "@/db/schema";
+import { AppError, jsonError } from "@/lib/errors";
+import { requireRuntimeAuth } from "@/server/modules/auth-runtime";
+import { updateNickname } from "@/server/modules/personal";
+
+export async function GET(req: Request) {
+  try {
+    const db = getRuntimeDb();
+    const user = await requireRuntimeAuth(req);
+    const [row] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(userNotifications)
+      .where(and(eq(userNotifications.userId, user.id), eq(userNotifications.isRead, 0)));
+
+    return Response.json({ data: { user, unreadCount: Number(row?.count ?? 0) } });
+  } catch (err) {
+    return jsonError(err);
+  }
+}
+
+const PatchSchema = z.object({ nickname: z.string().trim().min(1).max(20) });
+
+export async function PATCH(req: Request) {
+  try {
+    const db = getRuntimeDb();
+    const user = await requireRuntimeAuth(req);
+    const parsed = PatchSchema.safeParse(await req.json().catch(() => null));
+    if (!parsed.success) throw new AppError("VALIDATION_ERROR", "닉네임은 1~20자로 입력해 주세요.");
+    const data = await updateNickname(db, user.id, parsed.data.nickname);
+    return Response.json({ data });
+  } catch (err) {
+    return jsonError(err);
+  }
+}

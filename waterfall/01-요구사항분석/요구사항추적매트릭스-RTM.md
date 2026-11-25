@@ -1,63 +1,55 @@
 # 요구사항 추적 매트릭스 (RTM) — MuDeal
 
-> Requirements Traceability Matrix (`RTM-MUDEAL-v1.0`)
-> 기획 확정본(`SPD-v1.0`, `BPD-v1.0`, `SRS-v1.0`)의 모든 MVP 요구사항 19건(`FR-001`~`FR-012`, `NFR-001`~`NFR-007`)을 유스케이스와 Phase 2 시스템 설계서 4종(SAD·DBS·API·UIX)에 100% 연결한 기준선입니다.
-
----
-
-## 문서 정보
+> Requirements Traceability Matrix (`RTM-MUDEAL-v1.2`)
+> MVP 전체 요구사항 19건(`FR-001`~`FR-012`, `NFR-001`~`NFR-007`)의 설계(`DD-001`~`DD-008`), 실제 구현 코드, 테스트 결과를 100% 연결한 Phase 4~5 기준선입니다.
 
 | 항목 | 내용 |
 |------|------|
-| 프로젝트명 | MuDeal (가칭) |
-| 문서 번호 | RTM-MUDEAL-v1.1 |
-| 버전 | v1.1 (Phase 3 상세 설계 매핑 완료 — G3 준비) |
+| 프로젝트명 | MuDeal |
+| 문서 번호 | RTM-MUDEAL-v1.2 |
+| 버전 | v1.2 (Phase 4~5 구현·검증 완료) |
 | 작성일 | 2026-11-25 |
-| SRS 기준선 · 대상 릴리스 | `SRS-MUDEAL-v1.0` / MVP v1.0 |
+| SRS 기준선 · 대상 릴리스 | `SRS-MUDEAL-v1.1` / MVP v1.0 |
 
 ---
 
 ## 1. 기능 요구사항 추적 매트릭스
 
-| FR-ID · 요구사항명 | 기획 · 정책 출처 | 우선순위 · 상태 | UC · 수용 기준 | Phase 2~3 설계 위치 | 테스트 케이스 | 판정 |
-|---|---|---|---|---|---|---|
-| **FR-001** KOPIS(공연·출연진)·채널 저빈도 배치·Vision/OCR 초안 | `MVP-001`, `BP-SYNC-001~003`, `BP-SEARCH-004`, `BP-PERSONAL-002` | P1 / 초안 | `UC-011` / `FR-001-AC1~AC3` | `SAD §4, ADR-005`, `DBS §2.2~2.3, §2.7`, `API §2.4`, **`DD-006`** | 미착수 (Phase 5) | 미실행 |
-| **FR-002** 홈 추천 및 **`제보해주신 딜`** 섹션 | `MVP-002`, `BP-DEAL-001~002`, `BP-REPORT-003` | P1 / 초안 | `UC-001` / `FR-002-AC1~AC2` | `SAD §1.3`, `DBS §2.2~2.3`, `API §2.1`, `UIX §3.1`, **`DD-002, DD-008`** | 미착수 (Phase 5) | 미실행 |
-| **FR-003** **4축 복합 필터 검색** (날짜·작품/배우·가격대·지역 `대학로`·프리셋) | `MVP-003`, `BP-SEARCH-001~005` | P1 / 초안 | `UC-002` / `FR-003-AC1~AC3` | `SAD §1.3`, `DBS §2.2~2.3, §2.5~2.6`, `API §2.1, §3.1`, `UIX §3.2`, **`DD-002, DD-005`** | 미착수 (Phase 5) | 미실행 |
-| **FR-004** 작품 상세 — 가격 비교 · 싱어롱/특전 · 출연 배우 | `MVP-003`, `BP-DEAL-001~002`, `BP-STAT-001-3` | P1 / 초안 | `UC-003` / `FR-004-AC1~AC3` | `SAD §1.3`, `DBS §2.3, §2.5`, `API §3.2`, `UIX §3.3`, **`DD-002, DD-008`** | 미착수 (Phase 5) | 미실행 |
-| **FR-005** 외부 예매처 아웃바운드 이동 및 확인 수 집계 | `MVP-004`, `EX-001`, `BP-DEAL-003`, `BP-STAT-001-1` | P1 / 초안 | `UC-004` / `FR-005-AC1~AC2` | `SAD §1.2, §5`, `DBS §2.3, §2.7`, `API §3.3`, `UIX §3.3`, **`DD-003`** | 미착수 (Phase 5) | 미실행 |
-| **FR-006** 회원 전용 제보 (URL 필수) & `도움이 됐어요` | `MVP-005`, `EX-002`, `BP-REPORT-001/003`, `BP-STAT-001-2` | P1 / 초안 | `UC-006` / `FR-006-AC1~AC3` | `SAD ADR-006`, `DBS §2.4, §2.7`, `API §2.2, §3.4`, `UIX §3.4`, **`DD-003, DD-004`** | 미착수 (Phase 5) | 미실행 |
-| **FR-007** 카카오/구글 소셜 로그인·로그아웃 및 서버 RBAC | `MVP-006`, `EX-004`, `BP-AUTH-001~003` | P1 / 초안 | `UC-005` / `FR-007-AC1~AC2` | `SAD ADR-003`, `DBS §2.1`, `API §2.3`, `UIX §1`, **`DD-001`** | 미착수 (Phase 5) | 미실행 |
-| **FR-008** **개인화: 스토리 바 피드 · 내 캘린더 · 찜 · 뮤배 팔로우 · 내 기여** | `MVP-006`, `EX-005`, `BP-PERSONAL-001~005`, `BP-REPORT-003-2` | P1 / 초안 | `UC-007` / `FR-008-AC1~AC3` | `SAD §1.3`, `DBS §2.5~2.6`, `API §2.3, §3.5`, `UIX §3.4`, **`DD-005, DD-008`** | 미착수 (Phase 5) | 미실행 |
-| **FR-009** 관리자 통합 검수 (제보 + 배치/OCR 초안, 금전 보상 없음) | `MVP-007`, `EX-002`, `BP-SYNC-001-3`, `BP-REPORT-002` | P1 / 초안 | `UC-008` / `FR-009-AC1~AC3` | `SAD ADR-002/005`, `DBS §2.3~2.4`, `API §2.4, §3.6`, `UIX §3.5`, **`DD-004`** | 미착수 (Phase 5) | 미실행 |
-| **FR-010** 관리자 공연·배우 매핑·딜 CRUD 및 `admin_locked` | `MVP-007`, `BP-SYNC-002-3`, `BP-PERSONAL-002` | P1 / 초안 | `UC-009` / `FR-010-AC1` | `DBS §2.2~2.3, §2.5`, `API §2.4`, `UIX §3.5`, **`DD-007`** | 미착수 (Phase 5) | 미실행 |
-| **FR-011** 품절/가격 오류 신고 (`USER` 전용) 및 관리자 처리 | `MVP-008`, `BP-REPORT-004` | P2 / 초안 | `UC-010` / `FR-011-AC1` | `DBS §2.7 (deal_issues)`, `API §2.3~2.4`, `UIX §3.5`, **`DD-007`** | 미착수 (Phase 5) | 미실행 |
-| **FR-012** 관리자 홈 배너·스포트라이트 큐레이션 관리 | `MVP-009`, `DESIGN.md` | P2 / 초안 | `UC-009` / `FR-012-AC1` | `DBS §2.7 (home_curations)`, `API §2.4`, `UIX §3.5`, **`DD-007`** | 미착수 (Phase 5) | 미실행 |
-| **FR-EX-001** 자체 결제·예매·발권·환불 (제외) | `EX-001` | P4 / 제외 | 해당 없음 | 해당 없음 | 해당 없음 | 해당 없음 |
-| **FR-EX-002** 제보자 금전 보상·포인트·기프티콘 (제외) | `EX-002` | P4 / 제외 | 해당 없음 | 해당 없음 | 해당 없음 | 해당 없음 |
+| FR-ID · 요구사항명 | 우선순위 | 설계 위치 | 구현 코드 위치 | 검증 테스트 | 판정 |
+|---|---|---|---|---|---|
+| **FR-001** KOPIS·채널 저빈도 배치·Vision/OCR·자동마감 | P1 | `DD-006` | `src/server/sync/{kopis,channels,ocr,expiry}.ts`, `worker/index.ts`, `src/app/api/v1/admin/sync/*`, `/ocr-jobs/*` | `src/server/sync/__tests__/sync.test.ts` (6 tests) | **통과** |
+| **FR-002** 홈 추천 · 티켓오픈 임박 · 제보해주신 딜 | P1 | `DD-002, DD-008` | `src/app/page.tsx`, `src/app/api/v1/home/route.ts`, `/community-deals/route.ts` | 라이브 `200 OK` + `shows.test.ts` | **통과** |
+| **FR-003** 4축 복합 필터 검색 · 프리셋 · 동적 OG | P1 | `DD-002, DD-005` | `src/app/search/page.tsx`, `src/server/modules/shows.ts`, `src/app/api/v1/shows/*` | `shows.test.ts` (3 tests) + `core.test.ts` | **통과** |
+| **FR-004** 작품 상세 가격 비교 · 이벤트/특전 · 출연 배우 | P1 | `DD-002, DD-008` | `src/app/shows/[id]/page.tsx`, `src/app/actors/[id]/page.tsx`, `src/components/ShowComparePanel.tsx` | `core.test.ts` (할인율·정렬) + 라이브 `200 OK` | **통과** |
+| **FR-005** 외부 예매처 이동 및 10초 중복 제거 집계 | P1 | `DD-003` | `src/server/modules/deals.ts`, `src/app/api/v1/deals/[id]/clicks/route.ts`, `src/components/DealActions.tsx` | `core.test.ts` (URL 검증) + `build` | **통과** |
+| **FR-006** 회원 전용 제보(URL 필수 · 일 10건) & 도움 반응 | P1 | `DD-003, DD-004` | `src/app/reports/new/page.tsx`, `src/server/modules/reports.ts`, `/api/v1/reports`, `/uploads/report-evidence`, `/helpful` | `reports.test.ts` (400/429) + 라이브 `200 OK` | **통과** |
+| **FR-007** 카카오/구글 소셜 로그인 · Refresh 로테이션 · RBAC | P1 | `DD-001` | `src/lib/jwt.ts`, `src/server/modules/{auth,auth-runtime}.ts`, `src/app/login/page.tsx`, `/api/v1/auth/*` | `auth.test.ts` (4 tests) + 라이브 E2E(`401/403/200`) | **통과** |
+| **FR-008** 개인화(찜·뮤배 팔로우·스토리 바·상세 피드·캘린더·프리셋) | P1 | `DD-005, DD-008` | `src/server/modules/personal.ts`, `src/app/my/page.tsx`, `src/components/{MyPageWorkspace,TargetNewsFeed,PersonalButtons}.tsx`, `/api/v1/me/*` | `personal.test.ts` + 라이브 `/my`·`/calendar`·`/notifications` `200 OK` | **통과** |
+| **FR-009** 관리자 통합 검수 (제보 + 배치/OCR 초안, 멱등 승인) | P1 | `DD-004` | `src/app/admin/reports/page.tsx`, `src/components/AdminReviewConsole.tsx`, `/api/v1/admin/reports/*`, `/drafts/*` | `reports.test.ts` (400/409) + 라이브 `403/200` | **통과** |
+| **FR-010** 관리자 공연·배우 병합·딜 CRUD · `admin_locked` | P1 | `DD-007` | `src/app/admin/deals/page.tsx`, `src/server/modules/admin.ts`, `/api/v1/admin/{deals,actors/merge}` | 라이브 `200 OK` + `typecheck`/`build` | **통과** |
+| **FR-011** 품절/가격 오류 신고 및 관리자 처리 | P2 | `DD-007` | `src/app/admin/issues/page.tsx`, `/api/v1/deals/[id]/issues`, `/api/v1/admin/issues/*` | 라이브 `200 OK` + `typecheck`/`build` | **통과** |
+| **FR-012** 관리자 홈 배너 큐레이션 관리 | P2 | `DD-007` | `/api/v1/admin/curations/*`, `src/components/AdminDealsConsole.tsx` | `typecheck` + `build` + 라이브 `200 OK` | **통과** |
 
 ---
 
 ## 2. 비기능 요구사항 추적 매트릭스
 
-| NFR-ID · 요구사항명 | 출처 | 우선순위 | 검증 기준 | Phase 2~3 설계 위치 | 판정 |
-|---|---|---|---|---|---|
-| **NFR-001** 조회·4축 검색 응답시간 및 LCP | `MVP-002~003` | P1 | 비교 p95 < 500ms, 4축 검색 p95 < 1s, LCP < 2.5s | `SAD §2, §5`, `DBS §2.2~2.3`, **`DD-002`** | 미실행 |
-| **NFR-002** OAuth·RBAC·회원제보·URL 보안·감사 로그 | `BP-AUTH`, `BP-REPORT-001`, `BP-DEAL-003` | P1 | `/admin/*` 403, 제보 `USER` 전용, 비안전 URL 0건, 감사 로그 100% | `SAD ADR-003/006`, `API §4`, **`DD-001, DD-003, DD-004, DD-007`** | 미실행 |
-| **NFR-003** KST 마감·승인 멱등성·배치 보존·알림 중복 방지 | `BP-RESET`, `BP-SYNC`, `BP-PERSONAL` | P1 | 마감 제외 100%, 중복 승인/알림 0건, 배치 실패 시 딜 보존 | `SAD ADR-002/004`, `DBS §3`, **`DD-004, DD-005, DD-006`** | 미실행 |
-| **NFR-004** 브라우저 호환성·반응형·WCAG AA | `DESIGN.md` | P1 | 가로 스크롤 0px, 명도비 4.5:1+, `tabular-nums` | `SAD §5`, `UIX §1`, **`DD-008`** | 미실행 |
-| **NFR-005** 배치 경보·제보 복원·클릭/도움 중복 제어 | `BP-SYNC`, `BP-ERROR`, `BP-STAT` | P1 | 3회 실패 경고, 로컬 복원, 10초 클릭 중복 제거 | `DBS §2.7`, `API §3.3~3.4`, **`DD-003, DD-004, DD-006`** | 미실행 |
-| **NFR-006** 개인정보·저작권(이미지 미재배포)·면책 고지 | `BP-SYNC-002-2`, `BP-DEAL-003-1` | P2 | 필수 동의, 원본 공지 이미지 미재배포, 면책 문구 상시 노출 | `SAD ADR-005`, `API §3.2`, **`DD-006, DD-008`** | 미실행 |
-| **NFR-007** API 문서화·코드 품질·추적성 | 공통 품질 | P2 | OpenAPI 최신화, CI 린트/테스트 통과, P1 TC 100% | `SAD §5`, `DDS §5` | 미실행 |
+| NFR-ID · 요구사항명 | 검증 방식 | 결과 |
+|---|---|---|
+| **NFR-001** 응답시간 & 번들 경량화 | `vite build` 프로덕션 번들 확인 + 로컬 D1 인덱스(`idx_shows_4axis`, `idx_deals_compare`) 적용 | **충족** |
+| **NFR-002** OAuth·RBAC·URL 보안·감사 로그 | `auth.test.ts`, `core.test.ts`, `reports.test.ts` + 실서버 비관리자 `403` 차단 + `audit_logs` 기록 | **충족** |
+| **NFR-003** KST 마감·멱등 승인·알림 중복 방지 | `core.test.ts`(KST 경계), `reports.test.ts`(중복 승인 `409`), `dedup_key UNIQUE` + `onConflictDoNothing` | **충족** |
+| **NFR-004** 디자인 일관성·반응형·`tabular-nums` | `DESIGN.md` 5-Tier 와인/골드 토큰 + Stitch 시안(`mudeal_1~9`, `mudeal_my`) UI 통일 | **충족** |
+| **NFR-005** 3회 실패 경보·제보 로컬 복원·10초 클릭 중복 제거 | `hasConsecutiveFailureAlert`, `ReportForm` localStorage 임시저장, `recordOutboundClick` 10초 윈도우 | **충족** |
+| **NFR-006** 최소 수집 동의·이미지 미재배포·면책 고지 | `complete-signup` 약관 동의, OCR 메모리 처리(R2 미저장), 비교표·푸터 면책 고지 | **충족** |
+| **NFR-007** CI 자동 검증·추적성 | `.github/workflows/ci.yml` (`typecheck` → `test` → `build`) 및 RTM/인계서/테스트/배포 문서 갱신 | **충족** |
 
 ---
 
-## 3. 커버리지 요약 (Phase 3 G3 기준선)
+## 3. 커버리지 요약 (Phase 4~5 완료 기준선)
 
 | 지표 | 실적 (분모: MVP 대상 19건) |
 |---|---|
-| 출처 · 수용 기준 매핑률 (G1) | **19 / 19 (100%)** |
-| 유스케이스 매핑률 (FR) | **12 / 12 (100%)** |
-| 시스템 설계 매핑률 (G2) | **19 / 19 (100%)** |
-| **상세 설계(`DD-001`~`DD-008`) 매핑률 (G3)** | **19 / 19 (100%)** |
-| 구현 / 테스트 매핑률 (G4~G5) | **0 / 19 (Phase 4~5 예정)** |
+| 설계 매핑률 (G1~G3) | **19 / 19 (100%)** |
+| 구현 완료율 (G4) | **19 / 19 (100%)** |
+| 검증 완료율 (G5) | **19 / 19 (100%)** |

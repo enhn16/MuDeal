@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mudeal",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "./worker/index.ts",
+  "assets": {
+    "not_found_handling": "none"
+  },
+  "triggers": {
+    "crons": ["*/15 * * * *", "0 16 * * *", "0 */6 * * *"]
+  },
+  "vars": {
+    "OCR_DAILY_LIMIT": "100"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mudeal-db",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "EVIDENCE_BUCKET",
+      "bucket_name": "mudeal-evidence"
+    }
+  ]
+}

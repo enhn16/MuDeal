@@ -1,0 +1,251 @@
+<!DOCTYPE html><html lang="ko"><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MuDeal Admin — 공연·배우·딜 관리</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script id="tailwind-config">/** @type {import('tailwindcss').Config} */
+globalThis.tailwind = globalThis.tailwind || {};
+globalThis.tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        'primary': '#6E182B',
+        'on-primary': '#FFFFFF',
+        'secondary': '#8A1E37',
+        'on-secondary': '#FFFFFF',
+        'secondary-hover': '#72162C',
+        'curtain-noir': '#2B0D16',
+        'on-curtain-noir': '#FFFFFF',
+        'mulberry': '#4A1525',
+        'rose-mist': '#F9ECEF',
+        'champagne-gold': '#B89352',
+        'gold-wash': '#FAF6EE',
+        'surface': '#FFFFFF',
+        'on-surface': '#1F1719',
+        'surface-variant': '#FCF8F7',
+        'on-surface-variant': '#534649',
+        'surface-sunken': '#F6EFEF',
+        'outline': '#EAE0E1',
+        'outline-strong': '#D2C5C7',
+        'muted': '#736468',
+        'hint': '#B3A6A9',
+        'danger': '#9E2A3B',
+        'on-danger': '#FFFFFF',
+      },
+      borderRadius: {
+        'xs': '4px',
+        'DEFAULT': '8px',
+        'sm': '8px',
+        'md': '10px',
+        'lg': '12px',
+        'xl': '20px',
+        'full': '9999px',
+      },
+      spacing: {
+        'space-1': '4px',
+        'space-2': '8px',
+        'space-3': '12px',
+        'space-4': '16px',
+        'space-5': '20px',
+        'space-6': '24px',
+        'space-7': '32px',
+        'space-8': '40px',
+        'space-9': '56px',
+        'space-10': '72px',
+        'shell-max': '1100px',
+      },
+      fontFamily: {
+        'display': ['"Noto Serif KR"', 'sans-serif'],
+        'headline': ['"Noto Sans KR"', 'sans-serif'],
+        'title': ['"Noto Sans KR"', 'sans-serif'],
+        'body': ['"Noto Sans KR"', 'sans-serif'],
+        'label': ['"Noto Sans KR"', 'sans-serif'],
+      },
+      fontSize: {
+        'display-lg': ['36px', { lineHeight: '44px', letterSpacing: '-0.9px', fontWeight: '700' }],
+        'display-lg-mobile': ['28px', { lineHeight: '36px', letterSpacing: '-0.5px', fontWeight: '700' }],
+        'headline-lg': ['24px', { lineHeight: '30px', letterSpacing: '-0.6px', fontWeight: '700' }],
+        'headline-md': ['20px', { lineHeight: '28px', letterSpacing: '-0.4px', fontWeight: '600' }],
+        'title-lg': ['18px', { lineHeight: '24px', letterSpacing: '-0.5px', fontWeight: '700' }],
+        'title-md': ['15px', { lineHeight: '21px', letterSpacing: '-0.15px', fontWeight: '600' }],
+        'body-lg': ['15px', { lineHeight: '22px', letterSpacing: '-0.15px', fontWeight: '400' }],
+        'body-md': ['14px', { lineHeight: '21px', letterSpacing: '0px', fontWeight: '400' }],
+        'body-sm': ['13px', { lineHeight: '19px', letterSpacing: '0px', fontWeight: '400' }],
+        'label-lg': ['15px', { lineHeight: '20px', letterSpacing: '-0.15px', fontWeight: '600' }],
+        'label-md': ['13px', { lineHeight: '18px', letterSpacing: '0px', fontWeight: '600' }],
+        'label-sm': ['12px', { lineHeight: '16px', letterSpacing: '0px', fontWeight: '600' }],
+      },
+      transitionDuration: {
+        'state-change': '180ms',
+        'poster-zoom': '200ms',
+        'image-fade': '250ms',
+      },
+      transitionDelay: {
+        'state-change': '0ms',
+        'poster-zoom': '0ms',
+        'image-fade': '0ms',
+      },
+      transitionTimingFunction: {
+        'state-change': 'cubic-bezier(0.4, 0, 0.2, 1)',
+        'poster-zoom': 'cubic-bezier(0.4, 0, 0.2, 1)',
+        'image-fade': 'ease-in',
+      },
+    },
+  },
+};
+if (typeof module !== 'undefined') module.exports = globalThis.tailwind.config;
+</script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&amp;family=Noto+Serif+KR:wght@600;700&amp;display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=block" rel="stylesheet">
+  <style>
+    .material-symbols-outlined {
+      display: inline-block;
+      width: 1em;
+      height: 1em;
+      line-height: 1 !important;
+      box-sizing: content-box;
+      overflow: hidden;
+      white-space: nowrap;
+      direction: ltr;
+      vertical-align: middle;
+    }
+  </style>
+</head>
+<body class="bg-surface-variant text-on-surface font-body min-h-[1024px] antialiased flex" data-stitch-vh="min-h-[1024px]===min-h-screen">
+
+  <!-- Curtain Noir Left Sidebar (240px) -->
+  <aside class="w-60 shrink-0 min-h-[1024px] bg-curtain-noir text-on-curtain-noir flex flex-col justify-between p-space-5" data-stitch-vh="min-h-[1024px]===min-h-screen">
+    <div class="flex flex-col gap-space-6">
+      <a href="../home/Home.html" class="flex items-baseline gap-space-2">
+        <span data-design-text-token="headline-md" class="font-headline text-headline-md text-on-curtain-noir">MuDeal</span>
+        <span data-design-text-token="label-sm" class="font-label text-label-sm text-gold-wash">ADMIN</span>
+      </a>
+
+      <nav aria-label="어드민 메뉴" class="flex flex-col gap-space-2">
+        <a href="../admin-reports/AdminReports.html" class="h-10 px-space-3 rounded-sm text-on-curtain-noir/80 hover:bg-mulberry/60 hover:text-on-curtain-noir flex items-center justify-between transition-colors duration-state-change">
+          <span class="inline-flex items-center gap-space-2">
+            <span class="material-symbols-outlined text-lg" aria-hidden="true">fact_check</span>
+            <span data-design-text-token="label-md" class="font-label text-label-md">통합 검수</span>
+          </span>
+          <span data-design-text-token="label-sm" class="px-space-2 py-0 rounded-xs bg-secondary text-on-secondary font-label text-label-sm tabular-nums">5</span>
+        </a>
+
+        <a href="#" aria-current="page" class="h-10 px-space-3 rounded-sm bg-mulberry text-on-curtain-noir flex items-center gap-space-2">
+          <span class="material-symbols-outlined text-lg text-gold-wash" aria-hidden="true">theater_comedy</span>
+          <span data-design-text-token="label-md" class="font-label text-label-md">공연·배우·딜 관리</span>
+        </a>
+
+        <a href="../admin-issues/AdminIssues.html" class="h-10 px-space-3 rounded-sm text-on-curtain-noir/80 hover:bg-mulberry/60 hover:text-on-curtain-noir flex items-center justify-between transition-colors duration-state-change">
+          <span class="inline-flex items-center gap-space-2">
+            <span class="material-symbols-outlined text-lg" aria-hidden="true">report_problem</span>
+            <span data-design-text-token="label-md" class="font-label text-label-md">오류 신고</span>
+          </span>
+          <span data-design-text-token="label-sm" class="px-space-2 py-0 rounded-xs bg-surface text-on-surface font-label text-label-sm tabular-nums">3</span>
+        </a>
+      </nav>
+    </div>
+
+    <div class="border-t border-mulberry pt-space-4 flex flex-col gap-space-2">
+      <span data-design-text-token="body-sm" class="font-body text-body-sm text-on-curtain-noir/75">운영자: admin_jy</span>
+      <a href="../home/Home.html" class="inline-flex items-center gap-space-1 text-gold-wash hover:underline font-label text-label-sm">
+        <span class="material-symbols-outlined text-base" aria-hidden="true">open_in_new</span>
+        <span>서비스 홈 보기</span>
+      </a>
+    </div>
+  </aside>
+
+  <!-- Main Workspace -->
+  <div class="flex-1 flex flex-col min-w-0">
+    <header class="bg-surface border-b border-outline px-space-7 py-space-4 flex flex-wrap items-center justify-between gap-space-4">
+      <h1 data-design-text-token="headline-md" class="font-headline text-headline-md text-on-surface">공연 · 배우 · 딜 · 연동 관리</h1>
+      <button type="button" class="h-10 px-space-4 rounded-sm bg-secondary text-on-secondary hover:bg-secondary-hover font-label text-label-md inline-flex items-center gap-space-1">
+        <span class="material-symbols-outlined text-base" aria-hidden="true">sync</span>
+        <span>KOPIS 수동 재수집</span>
+      </button>
+    </header>
+
+    <main class="p-space-7 flex flex-col gap-space-6">
+      <!-- Batch Sync Status Banner -->
+      <section class="bg-surface rounded-lg border border-outline p-space-5 flex flex-wrap items-center justify-between gap-space-4">
+        <div class="flex items-center gap-space-3">
+          <span data-design-text-token="label-sm" class="px-space-2 py-0 rounded-xs bg-rose-mist text-primary font-label text-label-sm">배치 정상</span>
+          <span data-design-text-token="body-md" class="font-body text-body-md text-on-surface tabular-nums">최근 KOPIS 동기화: 11.25 01:00 KST · 활성 공연 142건 · 활성 딜 384건</span>
+        </div>
+        <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted">수동 잠금 딜 18건 보호 중</span>
+      </section>
+
+      <!-- Active Deals Table -->
+      <section class="bg-surface rounded-lg border border-outline p-space-6 flex flex-col gap-space-4">
+        <div class="flex items-center justify-between">
+          <h2 data-design-text-token="title-lg" class="font-title text-title-lg text-on-surface">활성 할인 딜 목록</h2>
+          <button type="button" class="h-9 px-space-3 rounded-sm bg-surface border border-outline text-on-surface-variant hover:bg-surface-variant font-label text-label-sm">+ 새 딜 등록</button>
+        </div>
+
+        <div class="w-full rounded-lg border border-outline overflow-x-auto">
+          <table class="w-full border-collapse text-left">
+            <thead class="bg-surface-sunken border-b border-outline">
+              <tr>
+                <th scope="col" class="py-space-3 px-space-4"><span data-design-text-token="label-md" class="font-label text-label-md text-on-surface-variant">작품 · 예매처</span></th>
+                <th scope="col" class="py-space-3 px-space-4"><span data-design-text-token="label-md" class="font-label text-label-md text-on-surface-variant">할인율 · 가격</span></th>
+                <th scope="col" class="py-space-3 px-space-4"><span data-design-text-token="label-md" class="font-label text-label-md text-on-surface-variant">잠금 상태</span></th>
+                <th scope="col" class="py-space-3 px-space-4 text-right"><span data-design-text-token="label-md" class="font-label text-label-md text-on-surface-variant">관리</span></th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-outline">
+              <tr>
+                <td class="py-space-3 px-space-4">
+                  <div class="flex flex-col">
+                    <span data-design-text-token="title-md" class="font-title text-title-md text-on-surface">뮤지컬 &lt;알라딘&gt;</span>
+                    <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted">NOL 로터리 · VIP석</span>
+                  </div>
+                </td>
+                <td class="py-space-3 px-space-4 tabular-nums">
+                  <span data-design-text-token="title-md" class="font-title text-title-md text-secondary">50%</span>
+                  <span data-design-text-token="body-md" class="font-body text-body-md text-on-surface ml-space-2">95,000원</span>
+                </td>
+                <td class="py-space-3 px-space-4">
+                  <span data-design-text-token="label-sm" class="px-space-2 py-0 rounded-xs bg-rose-mist text-primary font-label text-label-sm">admin_locked</span>
+                </td>
+                <td class="py-space-3 px-space-4 text-right">
+                  <button type="button" class="h-8 px-space-3 rounded-xs bg-surface border border-outline text-on-surface-variant hover:bg-surface-variant font-label text-label-sm">수정</button>
+                </td>
+              </tr>
+
+              <tr>
+                <td class="py-space-3 px-space-4">
+                  <div class="flex flex-col">
+                    <span data-design-text-token="title-md" class="font-title text-title-md text-on-surface">여신님이 보고 계셔</span>
+                    <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted">YES24 티켓 · 전석</span>
+                  </div>
+                </td>
+                <td class="py-space-3 px-space-4 tabular-nums">
+                  <span data-design-text-token="title-md" class="font-title text-title-md text-secondary">45%</span>
+                  <span data-design-text-token="body-md" class="font-body text-body-md text-on-surface ml-space-2">36,300원</span>
+                </td>
+                <td class="py-space-3 px-space-4">
+                  <span data-design-text-token="label-sm" class="px-space-2 py-0 rounded-xs bg-surface-sunken text-on-surface-variant font-label text-label-sm">자동 동기화</span>
+                </td>
+                <td class="py-space-3 px-space-4 text-right">
+                  <button type="button" class="h-8 px-space-3 rounded-xs bg-surface border border-outline text-on-surface-variant hover:bg-surface-variant font-label text-label-sm">수정</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Actor Disambiguation / Merge -->
+      <section class="bg-surface rounded-lg border border-outline p-space-6 flex flex-wrap items-center justify-between gap-space-4">
+        <div class="flex flex-col gap-space-1">
+          <h2 data-design-text-token="title-lg" class="font-title text-title-lg text-on-surface">배우 동명이인 매핑 보정</h2>
+          <span data-design-text-token="body-sm" class="font-body text-body-sm text-muted">중복 후보 1건</span>
+        </div>
+        <button type="button" class="h-10 px-space-4 rounded-sm bg-surface border border-outline text-on-surface hover:bg-surface-variant font-label text-label-md">동명이인 병합 검토</button>
+      </section>
+    </main>
+  </div>
+
+
+
+</body></html>
