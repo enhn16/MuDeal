@@ -4,6 +4,8 @@ import type { AppDb } from "@/db/client";
 import { deals, ocrImageJobs } from "@/db/schema";
 import { startOfKstDayUtc } from "@/lib/kst";
 import { sha256Hex } from "@/lib/jwt";
+import { recomputeShowPriceCache } from "@/server/modules/reports";
+import { AUTO_PUBLISH_CONFIDENCE } from "./channels";
 
 /** Exact structured OCR output schema from 상세설계서.md §4.4. */
 export const OcrExtractSchema = z.object({
@@ -168,6 +170,9 @@ export async function processPendingOcrJobs(
         .where(eq(ocrImageJobs.id, job.id));
 
       if (extracted.hasRelevantInfo) {
+        const dealStatus =
+          job.showId !== null && extracted.confidence >= AUTO_PUBLISH_CONFIDENCE ? "ACTIVE" : "DRAFT";
+
         for (const d of extracted.discounts) {
           await db.insert(deals).values({
             showId: job.showId,
@@ -181,7 +186,7 @@ export async function processPendingOcrJobs(
             conditionSummary: d.conditionSummary,
             externalUrl: job.sourcePageUrl,
             expiresAt: d.expiresAtKst ? new Date(`${d.expiresAtKst}+09:00`).toISOString() : null,
-            status: "DRAFT",
+            status: dealStatus,
             sourceType: "OCR_APPROVED",
             sourceOcrJobId: job.id,
           });
@@ -199,11 +204,15 @@ export async function processPendingOcrJobs(
             eventDatesJson: ev.eventDates.length ? JSON.stringify(ev.eventDates) : null,
             perkSummary: ev.perkSummary,
             externalUrl: job.sourcePageUrl,
-            status: "DRAFT",
+            status: dealStatus,
             sourceType: "OCR_APPROVED",
             sourceOcrJobId: job.id,
           });
           draftsCreated += 1;
+        }
+
+        if (dealStatus === "ACTIVE" && job.showId !== null) {
+          await recomputeShowPriceCache(db, job.showId);
         }
       }
 

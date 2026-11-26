@@ -89,10 +89,11 @@ export function AdminDealsConsole({
         const r = (raw ?? {}) as { expiredDeals?: number; endedShows?: number };
         summary = `딜 ${Number(r.expiredDeals ?? 0)}건 · 공연 ${Number(r.endedShows ?? 0)}건 마감 처리했어요.`;
       } else if (target === "CHANNELS" && Array.isArray(raw)) {
-        const rows = raw as Array<{ fetchedCount?: number; draftCount?: number; status?: string }>;
+        const rows = raw as Array<{ fetchedCount?: number; publishedCount?: number; draftCount?: number; status?: string }>;
         const fetched = rows.reduce((acc, x) => acc + Number(x.fetchedCount ?? 0), 0);
+        const published = rows.reduce((acc, x) => acc + Number(x.publishedCount ?? 0), 0);
         const drafts = rows.reduce((acc, x) => acc + Number(x.draftCount ?? 0), 0);
-        summary = `${fetched}건 확인, 초안 ${drafts}건 적재했어요.`;
+        summary = `${fetched}건 확인 · 자동 게시 ${published}건 · 검수 대기 ${drafts}건`;
       } else {
         const r = (raw ?? {}) as { fetchedCount?: number; status?: string; error?: string };
         summary =

@@ -10,6 +10,7 @@ import {
   type SubRegion,
 } from "@/db/schema";
 import { formatKstDate } from "@/lib/kst";
+import { isKidsMusical } from "./kids-filter";
 
 const DAEHAKRO_KEYWORDS = ["대학로", "동숭동", "혜화동", "명륜", "이화동", "연건동"];
 const DAEHAKRO_VENUES = [
@@ -204,23 +205,55 @@ export async function syncKopisShows(
     const edDate = new Date(now.getTime() + 90 * 86_400_000);
     const eddate = formatKstDate(edDate).replaceAll("-", "");
 
-    // shcate=GGGA (뮤지컬), paginated across up to maxPages * 50 items
+    // 1. Collect KOPIS official children's show IDs (kidstate=Y) so we can exclude kids musicals accurately.
+    const kidsKopisIds = new Set<string>();
+    try {
+      for (let page = 1; page <= 2; page++) {
+        const kidUrl = `https://www.kopis.or.kr/openApi/restful/pblprfr?service=${encodeURIComponent(
+          apiKey,
+        )}&stdate=${stdate}&eddate=${eddate}&cpage=${page}&rows=100&shcate=GGGA&kidstate=Y`;
+        const kRes = await fetchImpl(kidUrl);
+        if (!kRes.ok) break;
+        const kidItems = parseKopisXmlList(await kRes.text());
+        for (const k of kidItems) kidsKopisIds.add(k.kopisId);
+        if (kidItems.length < 100) break;
+      }
+    } catch {
+      // Fall back to keyword kids filter if kidstate=Y query fails
+    }
+
+    // 2. Fetch musicals prioritizing currently ongoing (prfstate=02) then upcoming (prfstate=01)
     const list: KopisShowSummary[] = [];
     const seenKopisIds = new Set<string>();
-    for (let page = 1; page <= maxPages; page++) {
-      const listUrl = `https://www.kopis.or.kr/openApi/restful/pblprfr?service=${encodeURIComponent(
-        apiKey,
-      )}&stdate=${stdate}&eddate=${eddate}&cpage=${page}&rows=50&shcate=GGGA`;
-      const res = await fetchImpl(listUrl);
-      if (!res.ok) throw new Error(`KOPIS list HTTP ${res.status}`);
-      const pageItems = parseKopisXmlList(await res.text());
-      for (const item of pageItems) {
-        if (seenKopisIds.has(item.kopisId)) continue;
-        seenKopisIds.add(item.kopisId);
-        list.push(item);
+    const statePlans: Array<{ prfstate: string; pages: number }> =
+      maxPages >= 2
+        ? [
+            { prfstate: "02", pages: Math.max(1, maxPages - 1) },
+            { prfstate: "01", pages: 1 },
+          ]
+        : [{ prfstate: "", pages: maxPages }];
+
+    for (const plan of statePlans) {
+      for (let page = 1; page <= plan.pages; page++) {
+        const stateParam = plan.prfstate ? `&prfstate=${plan.prfstate}` : "";
+        const listUrl = `https://www.kopis.or.kr/openApi/restful/pblprfr?service=${encodeURIComponent(
+          apiKey,
+        )}&stdate=${stdate}&eddate=${eddate}&cpage=${page}&rows=50&shcate=GGGA${stateParam}`;
+        const res = await fetchImpl(listUrl);
+        if (!res.ok) throw new Error(`KOPIS list HTTP ${res.status}`);
+        const pageItems = parseKopisXmlList(await res.text());
+        for (const item of pageItems) {
+          if (seenKopisIds.has(item.kopisId)) continue;
+          if (kidsKopisIds.has(item.kopisId) || isKidsMusical(item.title, item.venueName)) continue;
+          seenKopisIds.add(item.kopisId);
+          list.push(item);
+        }
+        if (pageItems.length < 50) break;
       }
-      if (pageItems.length < 50) break;
     }
+
+    // 3. Prioritize most recently opened/scheduled shows first for detail enrichment
+    list.sort((a, b) => b.startDate.localeCompare(a.startDate));
 
     const venueAddressCache = new Map<string, string | null>();
     let synced = 0;

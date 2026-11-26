@@ -12,7 +12,23 @@ import {
 } from "@/db/schema";
 import { calcDiscountRate } from "@/lib/pricing";
 import { parseSafeExternalUrl } from "@/lib/url";
+import { recomputeShowPriceCache } from "@/server/modules/reports";
+import { isKidsMusical } from "./kids-filter";
 import { normalizeTitle } from "./kopis";
+
+export const AUTO_PUBLISH_CONFIDENCE = 0.85;
+
+/** Strip region brackets, English subtitles, and anniversary/production suffixes for robust cross-channel matching. */
+export function normalizeCoreTitle(raw: string): string {
+  const stripped = raw
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/[-–—]\s*\d+\s*주년.*$/g, " ")
+    .replace(/\d+\s*주년(\s*기념)?(\s*공연)?/g, " ")
+    .replace(/:\s*\d+\s*차\s*프로덕션.*$/g, " ")
+    .replace(/[-–—]\s*(서울|대학로|부산|대구|대전|광주|인천|경기|울산|창원|의성|청주|수원|성남|고양|전주|여수|제주)\s*$/g, " ");
+  return normalizeTitle(stripped);
+}
 
 export interface RawChannelDraft {
   externalKey: string;
@@ -51,41 +67,75 @@ export interface ShowMatchCandidate {
   endDate: string;
 }
 
+export interface ShowMatchResult {
+  showId: number;
+  confidence: number;
+}
+
 /**
- * BP-SYNC-002-2: 3-factor matching (normalizedTitle + region/venue + period overlap).
+ * BP-SYNC-002-2: 3-factor matching (normalized/core title + region/venue + period overlap) with confidence score.
  * Returns null if 0 or ambiguous (>1) matches so admin manually confirms the DRAFT.
  */
+export function matchShowWithConfidence(
+  candidates: ShowMatchCandidate[],
+  item: Pick<RawChannelDraft, "showTitle" | "venueName" | "regionHint" | "subRegionHint" | "startDate" | "endDate">,
+): ShowMatchResult | null {
+  const norm = normalizeTitle(item.showTitle);
+  const core = normalizeCoreTitle(item.showTitle);
+  if (!norm && !core) return null;
+
+  const scored: Array<{ id: number; confidence: number }> = [];
+
+  for (const c of candidates) {
+    const cCore = normalizeCoreTitle(c.normalizedTitle);
+    const exactTitle =
+      (Boolean(norm) && c.normalizedTitle === norm) || (Boolean(core) && Boolean(cCore) && cCore === core);
+    const partialTitle =
+      !exactTitle &&
+      ((Boolean(norm) && (c.normalizedTitle.includes(norm) || norm.includes(c.normalizedTitle))) ||
+        (Boolean(core) && core.length >= 2 && Boolean(cCore) && (cCore.includes(core) || core.includes(cCore))));
+
+    if (!exactTitle && !partialTitle) continue;
+
+    // Factor 2: region or venue similarity
+    let placeMatched = false;
+    const hasPlaceHint = Boolean(item.subRegionHint || item.regionHint || item.venueName);
+    if (hasPlaceHint) {
+      const subOk = item.subRegionHint ? c.subRegion === item.subRegionHint : false;
+      const regOk = item.regionHint ? c.region.includes(item.regionHint) : false;
+      const venueNorm = (item.venueName ?? "").replace(/\s+/g, "");
+      const candVenueNorm = c.venueName.replace(/\s+/g, "");
+      const venueOk =
+        Boolean(venueNorm) && (candVenueNorm.includes(venueNorm) || venueNorm.includes(candVenueNorm));
+      placeMatched = subOk || regOk || venueOk;
+      if (!placeMatched) continue;
+    }
+
+    // Factor 3: date period overlap (if dates provided)
+    if (item.startDate && c.endDate < item.startDate) continue;
+    if (item.endDate && c.startDate > item.endDate) continue;
+
+    const confidence = exactTitle
+      ? placeMatched
+        ? 0.98
+        : 0.9
+      : placeMatched
+        ? 0.88
+        : 0.72;
+    scored.push({ id: c.id, confidence });
+  }
+
+  if (scored.length === 1) return { showId: scored[0].id, confidence: scored[0].confidence };
+  // If multiple candidates matched, prefer a single exact-title match if strictly higher than others
+  const top = scored.filter((s) => s.confidence >= 0.95);
+  return top.length === 1 ? { showId: top[0].id, confidence: top[0].confidence } : null;
+}
+
 export function matchShowThreeFactor(
   candidates: ShowMatchCandidate[],
   item: Pick<RawChannelDraft, "showTitle" | "venueName" | "regionHint" | "subRegionHint" | "startDate" | "endDate">,
 ): number | null {
-  const norm = normalizeTitle(item.showTitle);
-  if (!norm) return null;
-
-  const matches = candidates.filter((c) => {
-    const titleOk = c.normalizedTitle === norm || c.normalizedTitle.includes(norm) || norm.includes(c.normalizedTitle);
-    if (!titleOk) return false;
-
-    // Factor 2: region or venue similarity
-    let placeOk = true;
-    if (item.subRegionHint || item.regionHint || item.venueName) {
-      const subOk = item.subRegionHint ? c.subRegion === item.subRegionHint : false;
-      const regOk = item.regionHint ? c.region.includes(item.regionHint) : false;
-      const venueOk = item.venueName
-        ? c.venueName.replace(/\s+/g, "").includes(item.venueName.replace(/\s+/g, "")) ||
-          item.venueName.replace(/\s+/g, "").includes(c.venueName.replace(/\s+/g, ""))
-        : false;
-      placeOk = subOk || regOk || venueOk;
-    }
-    if (!placeOk) return false;
-
-    // Factor 3: date period overlap (if dates provided)
-    if (item.startDate && c.endDate < item.startDate) return false;
-    if (item.endDate && c.startDate > item.endDate) return false;
-    return true;
-  });
-
-  return matches.length === 1 ? matches[0].id : null;
+  return matchShowWithConfidence(candidates, item)?.showId ?? null;
 }
 
 /** Check if a channel failed 3 consecutive runs (FR-001 / NFR-005 admin warning). */
@@ -99,12 +149,19 @@ export async function hasConsecutiveFailureAlert(db: AppDb, sourceName: string):
   return recent.length === 3 && recent.every((r) => r.status === "FAILED");
 }
 
-/** ADR-004 & ADR-005: isolated adapter execution; writes DRAFT only, respects admin_locked=1, preserves existing deals on error. */
+/** Isolated adapter execution: auto-publishes high-confidence matches as ACTIVE, queues ambiguous ones as DRAFT, respects admin_locked=1. */
 export async function runChannelAdapter(
   db: AppDb,
   adapter: ChannelSyncAdapter,
   now = new Date(),
-): Promise<{ sourceName: string; status: "SUCCESS" | "FAILED"; fetchedCount: number; draftCount: number; alert: boolean }> {
+): Promise<{
+  sourceName: string;
+  status: "SUCCESS" | "FAILED";
+  fetchedCount: number;
+  publishedCount: number;
+  draftCount: number;
+  alert: boolean;
+}> {
   const [run] = await db
     .insert(syncRuns)
     .values({ sourceName: adapter.sourceName, status: "RUNNING" })
@@ -115,6 +172,7 @@ export async function runChannelAdapter(
     const candidates = await db
       .select({
         id: shows.id,
+        title: shows.title,
         normalizedTitle: shows.normalizedTitle,
         venueName: shows.venueName,
         region: shows.region,
@@ -124,16 +182,32 @@ export async function runChannelAdapter(
       })
       .from(shows);
 
+    const matchCandidates: ShowMatchCandidate[] = candidates.map((c) => ({
+      id: c.id,
+      normalizedTitle: normalizeCoreTitle(c.title) || c.normalizedTitle,
+      venueName: c.venueName,
+      region: c.region,
+      subRegion: c.subRegion,
+      startDate: c.startDate,
+      endDate: c.endDate,
+    }));
+
+    let publishedCount = 0;
     let draftCount = 0;
+    const touchedShowIds = new Set<number>();
     const nowIso = now.toISOString();
 
     for (const item of rawItems) {
+      if (isKidsMusical(item.showTitle, item.venueName)) continue;
       const safeUrl = parseSafeExternalUrl(item.externalUrl);
       if (!safeUrl) continue;
 
-      const matchedShowId = matchShowThreeFactor(candidates, item);
+      const match = matchShowWithConfidence(matchCandidates, item);
+      const matchedShowId = match?.showId ?? null;
+      const shouldAutoPublish = Boolean(match && match.confidence >= AUTO_PUBLISH_CONFIDENCE);
+
       const [existing] = await db
-        .select({ id: deals.id, adminLocked: deals.adminLocked })
+        .select({ id: deals.id, status: deals.status, showId: deals.showId, adminLocked: deals.adminLocked })
         .from(deals)
         .where(eq(deals.externalKey, item.externalKey))
         .limit(1);
@@ -158,11 +232,29 @@ export async function runChannelAdapter(
           externalUrl: safeUrl,
           externalKey: item.externalKey,
           expiresAt: item.expiresAt ?? null,
-          status: "DRAFT",
+          status: shouldAutoPublish ? "ACTIVE" : "DRAFT",
           sourceType: "SYNC_APPROVED",
           lastVerifiedAt: nowIso,
         });
-        draftCount += 1;
+        if (shouldAutoPublish && matchedShowId) {
+          publishedCount += 1;
+          touchedShowIds.add(matchedShowId);
+        } else {
+          draftCount += 1;
+        }
+      } else if (existing.status === "DRAFT" && shouldAutoPublish && matchedShowId) {
+        // Promote previously unmatched DRAFT once the corresponding show exists with high confidence
+        await db
+          .update(deals)
+          .set({
+            showId: matchedShowId,
+            status: "ACTIVE",
+            lastVerifiedAt: nowIso,
+            updatedAt: nowIso,
+          })
+          .where(eq(deals.id, existing.id));
+        publishedCount += 1;
+        touchedShowIds.add(matchedShowId);
       }
 
       // Queue new notice image URLs for Vision/OCR (unique imageUrl prevents duplicate calls)
@@ -182,17 +274,28 @@ export async function runChannelAdapter(
       }
     }
 
+    for (const sid of touchedShowIds) {
+      await recomputeShowPriceCache(db, sid);
+    }
+
     await db
       .update(syncRuns)
       .set({
         status: "SUCCESS",
         fetchedCount: rawItems.length,
-        draftCount,
+        draftCount: draftCount + publishedCount,
         finishedAt: new Date().toISOString(),
       })
       .where(eq(syncRuns.id, run.id));
 
-    return { sourceName: adapter.sourceName, status: "SUCCESS", fetchedCount: rawItems.length, draftCount, alert: false };
+    return {
+      sourceName: adapter.sourceName,
+      status: "SUCCESS",
+      fetchedCount: rawItems.length,
+      publishedCount,
+      draftCount,
+      alert: false,
+    };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await db
@@ -200,7 +303,14 @@ export async function runChannelAdapter(
       .set({ status: "FAILED", errorMessage: msg, finishedAt: new Date().toISOString() })
       .where(eq(syncRuns.id, run.id));
     const alert = await hasConsecutiveFailureAlert(db, adapter.sourceName);
-    return { sourceName: adapter.sourceName, status: "FAILED", fetchedCount: 0, draftCount: 0, alert };
+    return {
+      sourceName: adapter.sourceName,
+      status: "FAILED",
+      fetchedCount: 0,
+      publishedCount: 0,
+      draftCount: 0,
+      alert,
+    };
   }
 }
 

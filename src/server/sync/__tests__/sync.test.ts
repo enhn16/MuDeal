@@ -8,7 +8,14 @@ import {
   parseKopisXmlList,
   syncKopisShows,
 } from "@/server/sync/kopis";
-import { matchShowThreeFactor, type ShowMatchCandidate } from "@/server/sync/channels";
+import {
+  AUTO_PUBLISH_CONFIDENCE,
+  matchShowThreeFactor,
+  matchShowWithConfidence,
+  normalizeCoreTitle,
+  type ShowMatchCandidate,
+} from "@/server/sync/channels";
+import { isKidsMusical } from "@/server/sync/kids-filter";
 import { OcrExtractSchema } from "@/server/sync/ocr";
 
 describe("KOPIS parsers & Daehakro classifier", () => {
@@ -107,20 +114,23 @@ describe("3-factor regional tour matching & OCR schema", () => {
     expect(() => OcrExtractSchema.parse({ hasRelevantInfo: true, confidence: 1.5 })).toThrow();
   });
 
-  it("bounds KOPIS detail subrequests, caches duplicate venueId, and skips already-populated shows", async () => {
+  it("excludes kids musicals via KOPIS kidstate=Y & keyword filter, sorts recent-first, and caches venues", async () => {
     const fetchedUrls: string[] = [];
     const listXml = `<dbs>
-      <db><mt20id>PF1</mt20id><prfnm>뮤지컬 A</prfnm><prfpdfrom>2026.11.01</prfpdfrom><prfpdto>2026.12.31</prfpdto><fcltynm>유니플렉스 1관</fcltynm><area>서울특별시</area><prfstate>공연중</prfstate></db>
-      <db><mt20id>PF2</mt20id><prfnm>뮤지컬 B</prfnm><prfpdfrom>2026.11.01</prfpdfrom><prfpdto>2026.12.31</prfpdto><fcltynm>유니플렉스 2관</fcltynm><area>서울특별시</area><prfstate>공연중</prfstate></db>
-      <db><mt20id>PF3</mt20id><prfnm>이미수집작</prfnm><prfpdfrom>2026.11.01</prfpdfrom><prfpdto>2026.12.31</prfpdto><fcltynm>샤롯데씨어터</fcltynm><area>서울특별시</area><prfstate>공연중</prfstate></db>
+      <db><mt20id>PF1</mt20id><prfnm>뮤지컬 A</prfnm><prfpdfrom>2026.10.01</prfpdfrom><prfpdto>2026.12.31</prfpdto><fcltynm>유니플렉스 1관</fcltynm><area>서울특별시</area><prfstate>공연중</prfstate></db>
+      <db><mt20id>PF2</mt20id><prfnm>뮤지컬 B</prfnm><prfpdfrom>2026.11.20</prfpdfrom><prfpdto>2026.12.31</prfpdto><fcltynm>유니플렉스 2관</fcltynm><area>서울특별시</area><prfstate>공연중</prfstate></db>
+      <db><mt20id>PF3</mt20id><prfnm>이미수집작</prfnm><prfpdfrom>2026.09.01</prfpdfrom><prfpdto>2026.12.31</prfpdto><fcltynm>샤롯데씨어터</fcltynm><area>서울특별시</area><prfstate>공연중</prfstate></db>
+      <db><mt20id>PF_KID</mt20id><prfnm>아기돼지 삼형제</prfnm><prfpdfrom>2026.11.25</prfpdfrom><prfpdto>2026.12.31</prfpdto><fcltynm>아띠홀</fcltynm><area>인천</area><prfstate>공연중</prfstate></db>
     </dbs>`;
+    const kidXml = `<dbs><db><mt20id>PF_KID</mt20id><prfnm>아기돼지 삼형제</prfnm></db></dbs>`;
 
     const fakeFetch = vi.fn(async (input: string | URL | Request) => {
       const u = String(input);
       fetchedUrls.push(u);
+      if (u.includes("kidstate=Y")) return new Response(kidXml, { status: 200 });
       if (u.includes("/pblprfr?")) return new Response(listXml, { status: 200 });
       if (u.includes("/pblprfr/PF")) {
-        const id = u.includes("PF1") ? "PF1" : "PF2";
+        const id = u.includes("PF2") ? "PF2" : "PF1";
         return new Response(
           `<dbs><db><mt20id>${id}</mt20id><pcseguidance>R석 70,000원</pcseguidance><prfcast></prfcast><mt10id>FC_SAME</mt10id></db></dbs>`,
           { status: 200 },
@@ -142,7 +152,7 @@ describe("3-factor regional tour matching & OCR schema", () => {
           where: () => ({
             limit: async () => {
               selectIdx += 1;
-              // PF3 already has basePricesJson & venueAddress -> must skip detail fetch
+              // Recent-first order: PF2 (11.20) -> PF1 (10.01) -> PF3 (09.01, already populated -> skip detail)
               if (selectIdx === 3) return [{ id: 3, basePricesJson: '{"VIP":190000}', venueAddress: "송파구" }];
               return [];
             },
@@ -159,10 +169,38 @@ describe("3-factor regional tour matching & OCR schema", () => {
     });
 
     expect(res.status).toBe("SUCCESS");
-    expect(res.fetchedCount).toBe(3);
-    expect(res.detailFetchCount).toBe(2); // PF1 & PF2 only; PF3 skipped!
-    // 1 list + 2 detail + 1 venue (FC_SAME cached for PF2!) = 4 total fetch calls
+    expect(res.fetchedCount).toBe(3); // PF_KID excluded!
+    expect(res.detailFetchCount).toBe(2); // PF2 & PF1 only; PF3 skipped!
+    const detailCalls = fetchedUrls.filter((u) => u.includes("/pblprfr/PF"));
+    expect(detailCalls[0]).toContain("PF2"); // Most recent startDate fetched first!
+    expect(detailCalls[1]).toContain("PF1");
     expect(fetchedUrls.filter((u) => u.includes("/prfplc/"))).toHaveLength(1);
-    expect(fetchedUrls).toHaveLength(4);
+  });
+
+  it("matches cross-channel core titles with high confidence and filters kids shows", () => {
+    expect(isKidsMusical("어린이 캣츠 [검단]", "아띠홀")).toBe(true);
+    expect(isKidsMusical("겨울왕국 [서울]", "샤롯데씨어터")).toBe(false);
+    expect(isKidsMusical("레베카 [서울]", "충무아트센터")).toBe(false);
+
+    const match = matchShowWithConfidence(
+      [
+        {
+          id: 42,
+          normalizedTitle: normalizeCoreTitle("곤 투모로우 [대학로]"),
+          venueName: "홍익대 대학로 아트센터",
+          region: "서울",
+          subRegion: "DAEHAKRO",
+          startDate: "2026-09-15",
+          endDate: "2026-11-29",
+        },
+      ],
+      {
+        showTitle: "뮤지컬 <곤 투모로우> 10주년 기념 공연",
+        venueName: "홍익대 대학로 아트센터 대극장",
+        regionHint: "서울",
+      },
+    );
+    expect(match?.showId).toBe(42);
+    expect(match!.confidence).toBeGreaterThanOrEqual(AUTO_PUBLISH_CONFIDENCE);
   });
 });
