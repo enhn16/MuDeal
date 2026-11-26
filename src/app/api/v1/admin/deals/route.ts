@@ -15,7 +15,7 @@ const CreateDealSchema = z.object({
   isUnconditional: z.boolean().default(true),
   conditionSummary: z.string().trim().max(300).nullable().optional(),
   perkSummary: z.string().trim().max(300).nullable().optional(),
-  eventDates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).max(10).nullable().optional(),
+  eventDates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).max(31).nullable().optional(),
   externalUrl: z.string().trim().min(8).max(1000),
   expiresAt: z.string().nullable().optional(),
   adminLocked: z.boolean().default(true),

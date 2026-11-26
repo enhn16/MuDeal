@@ -6,7 +6,12 @@ import { writeAuditLog } from "@/server/modules/reports";
 import { DEFAULT_CHANNEL_ADAPTERS, runChannelAdapter } from "@/server/sync/channels";
 import { expireEndedDeals } from "@/server/sync/expiry";
 import { syncKopisShows } from "@/server/sync/kopis";
-import { createGeminiVisionExtractor, processPendingOcrJobs } from "@/server/sync/ocr";
+import {
+  createGeminiSynopsisExtractor,
+  createGeminiVisionExtractor,
+  populateMissingSynopses,
+  processPendingOcrJobs,
+} from "@/server/sync/ocr";
 
 const TriggerSchema = z.object({
   target: z.enum(["KOPIS", "CHANNELS", "OCR", "EXPIRY"]).default("KOPIS"),
@@ -36,10 +41,15 @@ export async function POST(req: Request) {
         throw new AppError("VALIDATION_ERROR", "GEMINI_API_KEY가 설정되지 않아 OCR을 실행할 수 없습니다.");
       }
       const dailyLimit = Math.max(1, Number(cfEnv.OCR_DAILY_LIMIT || 100));
-      result = await processPendingOcrJobs(db, {
+      const ocr = await processPendingOcrJobs(db, {
         dailyLimit,
         extractor: createGeminiVisionExtractor(cfEnv.GEMINI_API_KEY),
       });
+      const synopses = await populateMissingSynopses(db, {
+        extractor: createGeminiSynopsisExtractor(cfEnv.GEMINI_API_KEY),
+        batchSize: 4,
+      });
+      result = { ocr, synopses };
     } else {
       result = await expireEndedDeals(db);
     }

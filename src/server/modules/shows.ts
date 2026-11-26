@@ -15,7 +15,13 @@ import {
   type SeatGrade,
   type SubRegion,
 } from "@/db/schema";
-import { calcKstDDay, formatKstDate, isExpired, resolveDatePreset } from "@/lib/kst";
+import {
+  calcKstDDay,
+  formatKstDate,
+  isExpired,
+  normalizeEventDates,
+  resolveDatePreset,
+} from "@/lib/kst";
 import { compareDealsForDisplay, summarizeLowestDeals } from "@/lib/pricing";
 
 export type ShowSort = "LOWEST_PRICE" | "HIGHEST_DISCOUNT" | "CLOSING_SOON" | "POPULAR";
@@ -74,10 +80,12 @@ export interface ShowCardItem {
   primaryDealType: DealType;
   categories: HomeCategory[];
   perkHighlight: string | null;
+  perkDates: string[];
   eventHighlight: {
     dealType: "SINGALONG" | "CURTAIN_CALL";
     summary: string;
     date: string | null;
+    dates: string[];
   } | null;
   isUnconditional: boolean;
   earliestExpiresAt: string | null;
@@ -118,9 +126,12 @@ function toShowCard(
   show: typeof shows.$inferSelect,
   showDeals: (typeof deals.$inferSelect)[],
   now: Date,
+  preferUnconditional = true,
 ): ShowCardItem {
   const priced = showDeals.filter((d) => d.salePrice !== null).sort(compareDealsForDisplay);
-  const topDeal = priced[0] ?? showDeals[0];
+  const unconditionalPriced = priced.filter((d) => Boolean(d.isUnconditional));
+  const headlinePool = preferUnconditional && unconditionalPriced.length > 0 ? unconditionalPriced : priced;
+  const topDeal = headlinePool[0] ?? showDeals[0];
   const channels = new Set(showDeals.map((d) => d.channelName));
   const withExpiry = showDeals
     .map((d) => d.expiresAt)
@@ -131,13 +142,38 @@ function toShowCard(
   const categories = HOME_CATEGORIES.filter((cat) =>
     showDeals.some((d) => dealMatchesCategory(d, cat)),
   );
+  const resolveDealDates = (d: typeof deals.$inferSelect) =>
+    normalizeEventDates(parseJsonArray<string>(d.eventDatesJson), {
+      showStartDate: show.startDate,
+      showEndDate: show.endDate,
+      fallbackText: [d.conditionSummary, d.perkSummary].filter(Boolean).join(" "),
+      now,
+    });
+
+  const perkCandidates = showDeals.filter(
+    (d) => d.dealType === "PERK_GOODS" || Boolean(d.perkSummary?.trim()),
+  );
   const perkDeal =
-    showDeals.find((d) => d.dealType === "PERK_GOODS") ??
-    showDeals.find((d) => Boolean(d.perkSummary?.trim()));
+    perkCandidates.find((d) => d.dealType === "PERK_GOODS" && resolveDealDates(d).length > 0) ??
+    perkCandidates.find((d) => d.dealType === "PERK_GOODS") ??
+    perkCandidates.find((d) => resolveDealDates(d).length > 0) ??
+    perkCandidates[0];
+  const perkDates = perkDeal ? resolveDealDates(perkDeal) : [];
+
+  const eventCandidates = showDeals.filter(
+    (d) =>
+      d.dealType === "SINGALONG" ||
+      d.dealType === "CURTAIN_CALL" ||
+      (d.dealType === "SPECIAL_DAY" && d.salePrice === null && d.discountRate === null),
+  );
   const eventDeal =
-    showDeals.find((d) => d.dealType === "SINGALONG" || d.dealType === "CURTAIN_CALL") ??
-    showDeals.find((d) => d.dealType === "SPECIAL_DAY" && d.salePrice === null && d.discountRate === null);
-  const eventDates = eventDeal ? parseJsonArray<string>(eventDeal.eventDatesJson) : [];
+    eventCandidates.find(
+      (d) => (d.dealType === "SINGALONG" || d.dealType === "CURTAIN_CALL") && resolveDealDates(d).length > 0,
+    ) ??
+    eventCandidates.find((d) => d.dealType === "SINGALONG" || d.dealType === "CURTAIN_CALL") ??
+    eventCandidates.find((d) => resolveDealDates(d).length > 0) ??
+    eventCandidates[0];
+  const eventDates = eventDeal ? resolveDealDates(eventDeal) : [];
 
   return {
     id: show.id,
@@ -150,13 +186,14 @@ function toShowCard(
     channelCount: channels.size,
     lowestPrice: topDeal?.salePrice ?? null,
     basePrice: topDeal?.basePrice ?? null,
-    maxDiscountRate: showDeals.reduce<number | null>(
+    maxDiscountRate: (headlinePool.length > 0 ? headlinePool : showDeals).reduce<number | null>(
       (max, d) => (d.discountRate !== null && (max === null || d.discountRate > max) ? d.discountRate : max),
       null,
     ),
     primaryDealType: topDeal?.dealType ?? "TIMESALE",
     categories,
     perkHighlight: perkDeal ? perkDeal.perkSummary?.trim() || perkDeal.conditionSummary || "현장 특전 증정" : null,
+    perkDates,
     eventHighlight: eventDeal
       ? {
           dealType: (eventDeal.dealType === "SINGALONG" ? "SINGALONG" : "CURTAIN_CALL") as "SINGALONG" | "CURTAIN_CALL",
@@ -164,6 +201,7 @@ function toShowCard(
             eventDeal.conditionSummary ||
             (eventDeal.dealType === "SINGALONG" ? "싱어롱 이벤트" : "스페셜 커튼콜 이벤트"),
           date: eventDates[0] ?? null,
+          dates: eventDates,
         }
       : null,
     isUnconditional: Boolean(topDeal?.isUnconditional),
@@ -251,7 +289,8 @@ export function filterShowsWithDeals(
       if (!inShow && !inActors && !inDeals) continue;
     }
 
-    matched.push({ card: toShowCard(row.show, matchingDeals, now), viewCount: row.show.viewCount });
+    const preferUnconditional = !query.conditionTags?.length && query.dealType !== "LOTTERY";
+    matched.push({ card: toShowCard(row.show, matchingDeals, now, preferUnconditional), viewCount: row.show.viewCount });
   }
 
   const sort = query.sort ?? "LOWEST_PRICE";
@@ -329,8 +368,84 @@ export async function getHomeData(db: AppDb, now = new Date()) {
   const allCards = filterShowsWithDeals(dataset, { sort: "LOWEST_PRICE" }, now);
   const closingSoon = filterShowsWithDeals(dataset, { sort: "CLOSING_SOON" }, now).slice(0, 6);
 
+  const posterByShowId = new Map<number, string>();
+  for (const row of dataset) {
+    if (row.show.posterUrl) posterByShowId.set(row.show.id, row.show.posterUrl);
+  }
+  const allPosteredCards = allCards.filter((c): c is ShowCardItem & { posterUrl: string } => Boolean(c.posterUrl));
+  const allPosteredShows = dataset
+    .map((r) => r.show)
+    .filter((s): s is typeof shows.$inferSelect & { posterUrl: string } => Boolean(s.posterUrl));
+
+  const usedHeroPosters = new Set<string>();
+  const resolveHeroPoster = (hero: typeof homeCurations.$inferSelect): string | null => {
+    const pick = (url: string | null | undefined): string | null => {
+      if (!url || usedHeroPosters.has(url)) return null;
+      usedHeroPosters.add(url);
+      return url;
+    };
+
+    const explicit = pick(hero.imageUrl);
+    if (explicit) return explicit;
+
+    const hint = `${hero.linkUrl} ${hero.eyebrow ?? ""} ${hero.title} ${hero.subtitle ?? ""}`.toLowerCase();
+    const matchByTheme = (): string | null => {
+      if (hint.includes("perk") || hint.includes("특전") || hint.includes("굿즈")) {
+        const hit = allPosteredCards.find((c) => c.categories.includes("PERK") && !usedHeroPosters.has(c.posterUrl));
+        if (hit) return pick(hit.posterUrl);
+      }
+      if (hint.includes("event") || hint.includes("싱어롱") || hint.includes("커튼콜")) {
+        const hit = allPosteredCards.find((c) => c.categories.includes("EVENT") && !usedHeroPosters.has(c.posterUrl));
+        if (hit) return pick(hit.posterUrl);
+      }
+      if (hint.includes("daehakro") || hint.includes("대학로")) {
+        const hit = allPosteredCards.find((c) => c.subRegion === "DAEHAKRO" && !usedHeroPosters.has(c.posterUrl));
+        if (hit) return pick(hit.posterUrl);
+      }
+      if (hint.includes("lottery") || hint.includes("로터리")) {
+        const hit = allPosteredCards.find((c) => c.primaryDealType === "LOTTERY" && !usedHeroPosters.has(c.posterUrl));
+        if (hit) return pick(hit.posterUrl);
+      }
+      if (hint.includes("discount") || hint.includes("할인") || hint.includes("특가") || hint.includes("최저가")) {
+        const sorted = [...allPosteredCards]
+          .filter((c) => c.categories.includes("DISCOUNT") && !usedHeroPosters.has(c.posterUrl))
+          .sort((a, b) => (b.maxDiscountRate ?? 0) - (a.maxDiscountRate ?? 0));
+        if (sorted[0]) return pick(sorted[0].posterUrl);
+      }
+      return null;
+    };
+
+    const isSingleShowBanner = hero.linkUrl.startsWith("/shows/");
+    if (isSingleShowBanner && hero.showId) {
+      const linked = pick(posterByShowId.get(hero.showId));
+      if (linked) return linked;
+    }
+
+    const themed = matchByTheme();
+    if (themed) return themed;
+
+    if (!isSingleShowBanner && hero.showId) {
+      const linked = pick(posterByShowId.get(hero.showId));
+      if (linked) return linked;
+    }
+
+    const fallbackCard = allPosteredCards.find((c) => !usedHeroPosters.has(c.posterUrl));
+    if (fallbackCard) return pick(fallbackCard.posterUrl);
+
+    const fallbackShow = allPosteredShows.find((s) => !usedHeroPosters.has(s.posterUrl));
+    return pick(fallbackShow?.posterUrl);
+  };
+
+  const heroes = curations
+    .filter((c) => c.slotType === "HERO")
+    .slice(0, 3)
+    .map((hero) => ({
+      ...hero,
+      imageUrl: resolveHeroPoster(hero),
+    }));
+
   return {
-    heroes: curations.filter((c) => c.slotType === "HERO").slice(0, 3),
+    heroes,
     spotlight: curations.find((c) => c.slotType === "SPOTLIGHT") ?? null,
     closingSoon,
     communityDeals: communityRows.map(({ deal, show }) => ({
@@ -459,6 +574,7 @@ export async function getShowDetail(db: AppDb, showId: number, now = new Date())
       .select({
         id: actors.id,
         name: actors.name,
+        profileImageUrl: actors.profileImageUrl,
         followerCount: actors.followerCount,
         roleName: showActors.roleName,
       })
@@ -468,7 +584,7 @@ export async function getShowDetail(db: AppDb, showId: number, now = new Date())
   ]);
 
   const pricedDeals = dealRows
-    .filter((d) => d.salePrice !== null || d.discountRate !== null)
+    .filter((d) => d.salePrice !== null || d.discountRate !== null || d.dealType === "LOTTERY")
     .sort(compareDealsForDisplay)
     .map((d) => ({
       id: d.id,
@@ -505,13 +621,23 @@ export async function getShowDetail(db: AppDb, showId: number, now = new Date())
       channelName: d.channelName,
       dealType: d.dealType,
       opensAt: d.opensAt,
-      eventDates: parseJsonArray<string>(d.eventDatesJson),
+      eventDates: normalizeEventDates(parseJsonArray<string>(d.eventDatesJson), {
+        showStartDate: show.startDate,
+        showEndDate: show.endDate,
+        fallbackText: [d.conditionSummary, d.perkSummary].filter(Boolean).join(" "),
+        now,
+      }),
       perkSummary: d.perkSummary,
       conditionSummary: d.conditionSummary,
       externalUrl: d.externalUrl,
       expiresAt: d.expiresAt,
       lastVerifiedAt: d.lastVerifiedAt,
-    }));
+    }))
+    .sort((a, b) => {
+      const aDate = a.eventDates[0] ?? "9999-12-31";
+      const bDate = b.eventDates[0] ?? "9999-12-31";
+      return aDate.localeCompare(bDate) || a.id - b.id;
+    });
 
   const seatGrades = Array.from(new Set(pricedDeals.map((d) => d.seatGrade)));
   const summary = summarizeLowestDeals(pricedDeals);
@@ -532,6 +658,7 @@ export async function getShowDetail(db: AppDb, showId: number, now = new Date())
       subRegion: show.subRegion,
       startDate: show.startDate,
       endDate: show.endDate,
+      synopsis: show.synopsis,
       basePrices: parseBasePrices(show.basePricesJson),
       status: show.status,
     },

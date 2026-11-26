@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, like, or } from "drizzle-orm";
 import type { AppDb } from "@/db/client";
 import {
   actors,
@@ -16,22 +16,45 @@ const DAEHAKRO_KEYWORDS = ["대학로", "동숭동", "혜화동", "명륜", "이
 const DAEHAKRO_VENUES = [
   "유니플렉스",
   "예스24스테이지",
+  "예스24아트원",
   "링크아트센터",
   "드림아트센터",
   "TOM",
   "티오엠",
   "서경대학교 공연예술센터",
+  "서경스퀘어",
   "대학로",
   "자유극장",
   "아트원씨어터",
   "플러스씨어터",
 ];
 
+export interface ChannelLinks {
+  nol?: string;
+  yes24?: string;
+  lticket?: string;
+}
+
+export function parseChannelLinks(raw: string | null | undefined): ChannelLinks {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: ChannelLinks = {};
+    if (typeof parsed.nol === "string" && parsed.nol) out.nol = parsed.nol;
+    if (typeof parsed.yes24 === "string" && parsed.yes24) out.yes24 = parsed.yes24;
+    if (typeof parsed.lticket === "string" && parsed.lticket) out.lticket = parsed.lticket;
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 export function normalizeTitle(raw: string): string {
   return raw
     .toLowerCase()
     .replace(/뮤지컬/g, "")
-    .replace(/[<>\[\](){}「」『』·•.,:;\-_'"]/g, "")
+    .replace(/[<>\[\](){}「」『』〈〉《》·•.,:;\-_'"]/g, "")
     .replace(/\s+/g, "")
     .trim();
 }
@@ -41,10 +64,13 @@ export function classifySubRegion(
   region: string,
   venueAddress?: string | null,
   venueName?: string | null,
+  isDaehakroFlag?: boolean,
 ): SubRegion {
   const r = region.trim();
   const addr = venueAddress ?? "";
   const venue = venueName ?? "";
+
+  if (isDaehakroFlag) return "DAEHAKRO";
 
   if (r.includes("서울")) {
     if (
@@ -103,6 +129,39 @@ function xmlTag(block: string, tag: string): string {
   return m ? m[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").trim() : "";
 }
 
+function toHttpsKopisUrl(raw: string | null | undefined): string | null {
+  const trimmed = raw?.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("http://www.kopis.or.kr/")) {
+    return trimmed.replace(/^http:\/\//, "https://");
+  }
+  return trimmed.startsWith("https://") || trimmed.startsWith("http://") ? trimmed : null;
+}
+
+/** Extract NOL, YES24, and L.TICKET product IDs from KOPIS <relates> block (Ticketlink intentionally excluded). */
+export function parseKopisRelates(xml: string): ChannelLinks {
+  const links: ChannelLinks = {};
+  const relRe = /<relate>[\s\S]*?<relatenm>([\s\S]*?)<\/relatenm>[\s\S]*?<relateurl>([\s\S]*?)<\/relateurl>[\s\S]*?<\/relate>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = relRe.exec(xml)) !== null) {
+    const name = m[1].trim().toLowerCase();
+    const url = m[2].trim();
+    if (!url) continue;
+
+    if (!links.nol && (name.includes("놀유니버스") || name.includes("인터파크") || url.includes("interpark.com") || url.includes("nol.yanolja.com"))) {
+      const id = /(?:GoodsCode=|\/goods\/|\/products\/)(\d{7,9})/i.exec(url)?.[1];
+      if (id) links.nol = id;
+    } else if (!links.yes24 && (name.includes("예스24") || name.includes("yes24") || url.includes("yes24.com"))) {
+      const id = /(?:\/Perf\/|IdPerf=)(\d{4,7})/i.exec(url)?.[1];
+      if (id) links.yes24 = id;
+    } else if (!links.lticket && (name.includes("l티켓") || name.includes("엘티켓") || url.includes("l-ticket.co.kr"))) {
+      const id = /\/product\/detail\/(\d+)/i.exec(url)?.[1];
+      if (id) links.lticket = id;
+    }
+  }
+  return links;
+}
+
 export interface KopisShowSummary {
   kopisId: string;
   title: string;
@@ -119,6 +178,9 @@ export interface KopisShowDetail {
   pcseguidance: string;
   prfcast: string;
   venueId: string;
+  isDaehakro: boolean;
+  synopsisImageUrl: string | null;
+  channelLinks: ChannelLinks;
 }
 
 export function parseKopisXmlList(xml: string): KopisShowSummary[] {
@@ -134,7 +196,7 @@ export function parseKopisXmlList(xml: string): KopisShowSummary[] {
       startDate: xmlTag(block, "prfpdfrom").replaceAll(".", "-"),
       endDate: xmlTag(block, "prfpdto").replaceAll(".", "-"),
       venueName: xmlTag(block, "fcltynm") || "미정",
-      posterUrl: xmlTag(block, "poster") || null,
+      posterUrl: toHttpsKopisUrl(xmlTag(block, "poster")),
       region: xmlTag(block, "area") || "서울특별시",
       state: xmlTag(block, "prfstate"),
     });
@@ -145,11 +207,20 @@ export function parseKopisXmlList(xml: string): KopisShowSummary[] {
 export function parseKopisXmlDetail(xml: string): KopisShowDetail | null {
   const kopisId = xmlTag(xml, "mt20id");
   if (!kopisId) return null;
+  const styUrls = [...xml.matchAll(/<styurl>([\s\S]*?)<\/styurl>/gi)]
+    .map((m) => toHttpsKopisUrl(m[1]))
+    .filter((u): u is string => Boolean(u))
+    .slice(0, 3);
+  const synopsisImageUrl =
+    styUrls.length === 0 ? null : styUrls.length === 1 ? styUrls[0] : JSON.stringify(styUrls);
   return {
     kopisId,
     pcseguidance: xmlTag(xml, "pcseguidance"),
     prfcast: xmlTag(xml, "prfcast"),
     venueId: xmlTag(xml, "mt10id"),
+    isDaehakro: xmlTag(xml, "daehakro").toUpperCase() === "Y",
+    synopsisImageUrl,
+    channelLinks: parseKopisRelates(xml),
   };
 }
 
@@ -162,12 +233,15 @@ function mapKopisState(state: string, startDate: string, todayKst: string): "UPC
 export interface KopisSyncOptions {
   maxPages?: number;
   maxDetailFetches?: number;
+  requestDelayMs?: number;
   fetchFn?: typeof fetch;
 }
 
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
- * FR-001: daily KOPIS sync (auto-upserts shows, actors, show_actors, notifies actor followers).
- * Bounded for Cloudflare Workers Free subrequest limit via venueId caching & incremental detail fetch.
+ * FR-001: daily KOPIS sync (auto-upserts shows, channelLinks from <relates>, synopsisImageUrl, actors, show_actors).
+ * Uses official kidstate=N filter with rows=100 so all non-kids musicals fit cleanly in 2-3 list requests.
  */
 export async function syncKopisShows(
   db: AppDb,
@@ -197,32 +271,16 @@ export async function syncKopisShows(
 
   const fetchImpl = opts.fetchFn ?? fetch;
   const maxPages = Math.max(1, opts.maxPages ?? 3);
-  const maxDetailFetches = Math.max(0, opts.maxDetailFetches ?? 18);
+  const maxDetailFetches = Math.max(0, opts.maxDetailFetches ?? 16);
+  const requestDelayMs = opts.requestDelayMs ?? (opts.fetchFn ? 0 : 250);
 
   try {
     const todayKst = formatKstDate(now);
     const stdate = todayKst.replaceAll("-", "");
-    const edDate = new Date(now.getTime() + 90 * 86_400_000);
+    const edDate = new Date(now.getTime() + 180 * 86_400_000);
     const eddate = formatKstDate(edDate).replaceAll("-", "");
 
-    // 1. Collect KOPIS official children's show IDs (kidstate=Y) so we can exclude kids musicals accurately.
-    const kidsKopisIds = new Set<string>();
-    try {
-      for (let page = 1; page <= 2; page++) {
-        const kidUrl = `https://www.kopis.or.kr/openApi/restful/pblprfr?service=${encodeURIComponent(
-          apiKey,
-        )}&stdate=${stdate}&eddate=${eddate}&cpage=${page}&rows=100&shcate=GGGA&kidstate=Y`;
-        const kRes = await fetchImpl(kidUrl);
-        if (!kRes.ok) break;
-        const kidItems = parseKopisXmlList(await kRes.text());
-        for (const k of kidItems) kidsKopisIds.add(k.kopisId);
-        if (kidItems.length < 100) break;
-      }
-    } catch {
-      // Fall back to keyword kids filter if kidstate=Y query fails
-    }
-
-    // 2. Fetch musicals prioritizing currently ongoing (prfstate=02) then upcoming (prfstate=01)
+    // 1. Fetch non-kids musicals directly via kidstate=N (rows=100) prioritizing ongoing (02) then upcoming (01)
     const list: KopisShowSummary[] = [];
     const seenKopisIds = new Set<string>();
     const statePlans: Array<{ prfstate: string; pages: number }> =
@@ -238,53 +296,77 @@ export async function syncKopisShows(
         const stateParam = plan.prfstate ? `&prfstate=${plan.prfstate}` : "";
         const listUrl = `https://www.kopis.or.kr/openApi/restful/pblprfr?service=${encodeURIComponent(
           apiKey,
-        )}&stdate=${stdate}&eddate=${eddate}&cpage=${page}&rows=50&shcate=GGGA${stateParam}`;
+        )}&stdate=${stdate}&eddate=${eddate}&cpage=${page}&rows=100&shcate=GGGA&kidstate=N${stateParam}`;
         const res = await fetchImpl(listUrl);
         if (!res.ok) throw new Error(`KOPIS list HTTP ${res.status}`);
         const pageItems = parseKopisXmlList(await res.text());
         for (const item of pageItems) {
           if (seenKopisIds.has(item.kopisId)) continue;
-          if (kidsKopisIds.has(item.kopisId) || isKidsMusical(item.title, item.venueName)) continue;
+          if (isKidsMusical(item.title, item.venueName)) continue;
           seenKopisIds.add(item.kopisId);
           list.push(item);
         }
-        if (pageItems.length < 50) break;
+        if (pageItems.length < 100) break;
       }
     }
 
-    // 3. Prioritize most recently opened/scheduled shows first for detail enrichment
-    list.sort((a, b) => b.startDate.localeCompare(a.startDate));
+    // 2. Prioritize currently ongoing shows first (then most recently started) so active musicals get relates/styurls immediately
+    list.sort((a, b) => {
+      const aOngoing = a.state.includes("공연중") || a.startDate <= todayKst ? 1 : 0;
+      const bOngoing = b.state.includes("공연중") || b.startDate <= todayKst ? 1 : 0;
+      if (aOngoing !== bOngoing) return bOngoing - aOngoing;
+      return b.startDate.localeCompare(a.startDate);
+    });
 
     const venueAddressCache = new Map<string, string | null>();
     let synced = 0;
     let detailFetchCount = 0;
 
     for (const item of list) {
+      const normTitle = normalizeTitle(item.title);
       const [existing] = await db
         .select({
           id: shows.id,
+          kopisId: shows.kopisId,
           basePricesJson: shows.basePricesJson,
           venueAddress: shows.venueAddress,
+          channelLinksJson: shows.channelLinksJson,
+          synopsisImageUrl: shows.synopsisImageUrl,
         })
         .from(shows)
-        .where(eq(shows.kopisId, item.kopisId))
+        .where(
+          or(
+            eq(shows.kopisId, item.kopisId),
+            and(
+              like(shows.kopisId, "XLSX_%"),
+              eq(shows.normalizedTitle, normTitle),
+              eq(shows.startDate, item.startDate),
+            ),
+          ),
+        )
         .limit(1);
 
-      const needsDetail = !existing || (!existing.basePricesJson && !existing.venueAddress);
+      const needsDetail =
+        !existing ||
+        (!existing.basePricesJson && !existing.venueAddress) ||
+        !existing.channelLinksJson ||
+        !existing.synopsisImageUrl;
       let detail: KopisShowDetail | null = null;
       let venueAddress: string | null = existing?.venueAddress ?? null;
 
       if (needsDetail && detailFetchCount < maxDetailFetches) {
+        if (detailFetchCount > 0 && requestDelayMs > 0) await delay(requestDelayMs);
         detailFetchCount += 1;
         try {
           const dRes = await fetchImpl(
             `https://www.kopis.or.kr/openApi/restful/pblprfr/${encodeURIComponent(item.kopisId)}?service=${encodeURIComponent(apiKey)}`,
           );
           if (dRes.ok) detail = parseKopisXmlDetail(await dRes.text());
-          if (detail?.venueId) {
+          if (detail?.venueId && !venueAddress) {
             if (venueAddressCache.has(detail.venueId)) {
               venueAddress = venueAddressCache.get(detail.venueId) ?? null;
             } else {
+              if (requestDelayMs > 0) await delay(requestDelayMs);
               const vRes = await fetchImpl(
                 `https://www.kopis.or.kr/openApi/restful/prfplc/${encodeURIComponent(detail.venueId)}?service=${encodeURIComponent(apiKey)}`,
               );
@@ -298,8 +380,14 @@ export async function syncKopisShows(
         }
       }
 
-      const subRegion = classifySubRegion(item.region, venueAddress, item.venueName);
+      const subRegion = classifySubRegion(item.region, venueAddress, item.venueName, detail?.isDaehakro);
       const basePrices = parseBasePricesText(detail?.pcseguidance);
+      const mergedLinks: ChannelLinks = {
+        ...parseChannelLinks(existing?.channelLinksJson),
+        ...(detail?.channelLinks ?? {}),
+      };
+      const hasLinks = Object.keys(mergedLinks).length > 0;
+      const synopsisImageUrl = existing?.synopsisImageUrl ?? detail?.synopsisImageUrl ?? null;
       const status = mapKopisState(item.state, item.startDate, todayKst);
       const nowIso = now.toISOString();
 
@@ -309,6 +397,7 @@ export async function syncKopisShows(
         await db
           .update(shows)
           .set({
+            kopisId: item.kopisId,
             title: item.title,
             normalizedTitle: normalizeTitle(item.title),
             posterUrl: item.posterUrl,
@@ -319,6 +408,8 @@ export async function syncKopisShows(
             startDate: item.startDate,
             endDate: item.endDate,
             ...(basePrices ? { basePricesJson: JSON.stringify(basePrices) } : {}),
+            ...(hasLinks ? { channelLinksJson: JSON.stringify(mergedLinks) } : {}),
+            ...(synopsisImageUrl ? { synopsisImageUrl } : {}),
             status,
             updatedAt: nowIso,
           })
@@ -338,13 +429,15 @@ export async function syncKopisShows(
             startDate: item.startDate,
             endDate: item.endDate,
             basePricesJson: basePrices ? JSON.stringify(basePrices) : null,
+            channelLinksJson: hasLinks ? JSON.stringify(mergedLinks) : null,
+            synopsisImageUrl,
             status,
           })
           .returning({ id: shows.id });
         showId = inserted.id;
       }
 
-      // Parse prfcast -> actors + show_actors + notify followers if brand new show
+      // Fallback cast from KOPIS prfcast (later enriched with full role/photo cast by NOL & YES24 adapters)
       const castNames = parseCastText(detail?.prfcast);
       const linkedActorIds: number[] = [];
       for (const name of castNames) {

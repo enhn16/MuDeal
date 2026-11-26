@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { formatEventDates } from "@/lib/kst";
 import { DEAL_TYPE_LABELS, SUB_REGION_SHORT, dealBadgeClass } from "@/lib/labels";
 import { formatKrw } from "@/lib/pricing";
 import type { HomeCategory, ShowCardItem } from "@/server/modules/shows";
@@ -41,6 +42,19 @@ export function ShowCard({
         ? "무조건 할인"
         : DEAL_TYPE_LABELS[show.primaryDealType];
 
+  const perkDateLabel = isPerkView ? formatEventDates(show.perkDates, "compact") : null;
+  const eventDateLabel =
+    isEventView && show.eventHighlight
+      ? formatEventDates(
+          show.eventHighlight.dates.length > 0
+            ? show.eventHighlight.dates
+            : show.eventHighlight.date
+              ? [show.eventHighlight.date]
+              : [],
+          "compact",
+        )
+      : null;
+
   const footerMeta =
     !isPerkView && !isEventView && show.communityCredit
       ? `${show.communityCredit.reporterNickname}님 제보 · 도움 ${show.communityCredit.helpfulCount}`
@@ -70,13 +84,33 @@ export function ShowCard({
         </h3>
 
         {isPerkView && show.perkHighlight ? (
-          <p className="min-h-[38px] pt-0.5 text-[13px] font-medium leading-snug text-on-surface line-clamp-2">
-            {show.perkHighlight}
-          </p>
+          <div className="flex flex-col gap-1 pt-0.5">
+            <p className="min-h-[38px] text-[13px] font-medium leading-snug text-on-surface line-clamp-2">
+              {show.perkHighlight}
+            </p>
+            {perkDateLabel && (
+              <p className="inline-flex items-center gap-1 truncate text-xs font-semibold text-primary tabular-nums">
+                <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden="true">
+                  calendar_month
+                </span>
+                <span className="truncate">{perkDateLabel}</span>
+              </p>
+            )}
+          </div>
         ) : isEventView && show.eventHighlight ? (
-          <p className="min-h-[38px] pt-0.5 text-[13px] font-medium leading-snug text-on-surface line-clamp-2">
-            {show.eventHighlight.summary}
-          </p>
+          <div className="flex flex-col gap-1 pt-0.5">
+            <p className="min-h-[38px] text-[13px] font-medium leading-snug text-on-surface line-clamp-2">
+              {show.eventHighlight.summary}
+            </p>
+            {eventDateLabel && (
+              <p className="inline-flex items-center gap-1 truncate text-xs font-semibold text-primary tabular-nums">
+                <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden="true">
+                  calendar_month
+                </span>
+                <span className="truncate">{eventDateLabel}</span>
+              </p>
+            )}
+          </div>
         ) : (
           <div className="flex flex-wrap items-baseline gap-1.5 pt-0.5 tabular-nums">
             {show.maxDiscountRate !== null && (
@@ -99,17 +133,10 @@ export function ShowCard({
 
         <div className="mt-auto flex items-center justify-between gap-2 border-t border-outline pt-2">
           <span className="truncate text-[11px] text-muted tabular-nums">{footerMeta}</span>
-          {isEventView && show.eventHighlight?.date ? (
+          {show.dDay !== null && show.dDay >= 0 && (
             <span className="shrink-0 text-xs font-semibold text-primary tabular-nums">
-              {show.eventHighlight.date.slice(5).replace("-", ".")}
+              {show.dDay === 0 ? "오늘 마감" : `D-${show.dDay}`}
             </span>
-          ) : (
-            show.dDay !== null &&
-            show.dDay >= 0 && (
-              <span className="shrink-0 text-xs font-semibold text-primary tabular-nums">
-                {show.dDay === 0 ? "오늘 마감" : `D-${show.dDay}`}
-              </span>
-            )
           )}
         </div>
       </div>

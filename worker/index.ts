@@ -4,7 +4,12 @@ import type { CloudflareEnv } from "../src/env";
 import { DEFAULT_CHANNEL_ADAPTERS, runChannelAdapter } from "../src/server/sync/channels";
 import { expireEndedDeals } from "../src/server/sync/expiry";
 import { syncKopisShows } from "../src/server/sync/kopis";
-import { createGeminiVisionExtractor, processPendingOcrJobs } from "../src/server/sync/ocr";
+import {
+  createGeminiSynopsisExtractor,
+  createGeminiVisionExtractor,
+  populateMissingSynopses,
+  processPendingOcrJobs,
+} from "../src/server/sync/ocr";
 
 const SECURITY_HEADERS: ReadonlyArray<[string, string]> = [
   ["X-Content-Type-Options", "nosniff"],
@@ -52,6 +57,10 @@ export default {
       await processPendingOcrJobs(db, {
         dailyLimit: Math.max(1, Number(env.OCR_DAILY_LIMIT || 100)),
         extractor: createGeminiVisionExtractor(env.GEMINI_API_KEY),
+      });
+      await populateMissingSynopses(db, {
+        extractor: createGeminiSynopsisExtractor(env.GEMINI_API_KEY),
+        batchSize: 4,
       });
     }
   },

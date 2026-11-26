@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { formatKstDateTime } from "@/lib/kst";
+import { expandDateRange, formatKstDateTime } from "@/lib/kst";
 import { DEAL_TYPE_LABELS, SEAT_GRADE_LABELS } from "@/lib/labels";
 import { formatKrw } from "@/lib/pricing";
 import { DEAL_TYPES, type DealType, type SeatGrade } from "@/db/schema";
@@ -57,6 +57,7 @@ export function AdminDealsConsole({
   const [conditionSummary, setConditionSummary] = useState("");
   const [perkSummary, setPerkSummary] = useState("");
   const [eventDate, setEventDate] = useState("");
+  const [eventEndDate, setEventEndDate] = useState("");
   const [expiresDate, setExpiresDate] = useState("");
   const [sourceActorId, setSourceActorId] = useState("");
   const [targetActorId, setTargetActorId] = useState("");
@@ -177,7 +178,7 @@ export function AdminDealsConsole({
         isUnconditional: true,
         conditionSummary: conditionSummary || null,
         perkSummary: perkSummary || null,
-        eventDates: eventDate ? [eventDate] : null,
+        eventDates: eventDate ? expandDateRange(eventDate, eventEndDate || eventDate) : null,
         expiresAt: expiresDate ? new Date(`${expiresDate}T23:59:59+09:00`).toISOString() : null,
         externalUrl,
         adminLocked: true,
@@ -202,6 +203,7 @@ export function AdminDealsConsole({
     setConditionSummary("");
     setPerkSummary("");
     setEventDate("");
+    setEventEndDate("");
     setExpiresDate("");
     setMessage("새 딜을 등록했어요.");
     router.refresh();
@@ -370,13 +372,21 @@ export function AdminDealsConsole({
               value={perkSummary}
               onChange={(e) => setPerkSummary(e.target.value)}
               placeholder="특전 내용 (예: 스페셜 포토카드 1종 증정 · 선택)"
+              className="h-9 rounded-sm border border-outline bg-surface px-3 text-xs sm:col-span-2"
+            />
+            <input
+              type="date"
+              aria-label="이벤트 시작 날짜"
+              value={eventDate}
+              onChange={(e) => setEventDate(e.target.value)}
               className="h-9 rounded-sm border border-outline bg-surface px-3 text-xs"
             />
             <input
               type="date"
-              aria-label="이벤트 회차 날짜"
-              value={eventDate}
-              onChange={(e) => setEventDate(e.target.value)}
+              aria-label="이벤트 종료 날짜 (기간 선택)"
+              min={eventDate || undefined}
+              value={eventEndDate}
+              onChange={(e) => setEventEndDate(e.target.value)}
               className="h-9 rounded-sm border border-outline bg-surface px-3 text-xs"
             />
             <div className="sm:col-span-2 flex justify-end">

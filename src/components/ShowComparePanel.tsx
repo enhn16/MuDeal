@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { ConditionTag, DealType, SeatGrade } from "@/db/schema";
 import { formatKstDateTime } from "@/lib/kst";
-import { CONDITION_TAG_LABELS, SEAT_GRADE_LABELS } from "@/lib/labels";
+import { CONDITION_TAG_LABELS, DEAL_TYPE_LABELS, SEAT_GRADE_LABELS } from "@/lib/labels";
 import { compareDealsForDisplay, formatKrw, summarizeLowestDeals } from "@/lib/pricing";
 import { FlagDealIssueButton, HelpfulButton, OutboundButton } from "./DealActions";
 import { AddShowToCalendarButton } from "./PersonalButtons";
@@ -28,6 +28,14 @@ export interface PricedDealRow {
   clickCount: number;
   helpfulCount: number;
   lastVerifiedAt: string;
+}
+
+/** Sort unconditional discounts first (lowest price first), then conditional/lottery discounts (lowest price first). */
+function sortAllDealsUnconditionalFirst(a: PricedDealRow, b: PricedDealRow): number {
+  const uncA = a.isUnconditional ? 1 : 0;
+  const uncB = b.isUnconditional ? 1 : 0;
+  if (uncA !== uncB) return uncB - uncA;
+  return compareDealsForDisplay(a, b);
 }
 
 /** Stitch mudeal_3 full 12-col split: Left 8-col stack + Right 4-col sticky summary sidebar. */
@@ -56,24 +64,45 @@ export function ShowComparePanel({
 }) {
   const [selectedSeat, setSelectedSeat] = useState<"ALL_TAB" | SeatGrade>("ALL_TAB");
   const [unconditionalOnly, setUnconditionalOnly] = useState(false);
+  const [selectedTag, setSelectedTag] = useState<ConditionTag | null>(null);
+
+  const seatFiltered = useMemo(() => {
+    return deals.filter((d) => {
+      if (selectedSeat !== "ALL_TAB" && d.seatGrade !== selectedSeat && d.seatGrade !== "ALL") {
+        return false;
+      }
+      return true;
+    });
+  }, [deals, selectedSeat]);
+
+  const availableTags = useMemo(() => {
+    const tagSet = new Set<ConditionTag>();
+    for (const d of seatFiltered) {
+      for (const t of d.conditionTags) tagSet.add(t);
+    }
+    return Array.from(tagSet);
+  }, [seatFiltered]);
+
+  const unconditionalCount = useMemo(
+    () => seatFiltered.filter((d) => d.isUnconditional).length,
+    [seatFiltered],
+  );
 
   const visible = useMemo(() => {
-    return deals
+    return seatFiltered
       .filter((d) => {
-        if (selectedSeat !== "ALL_TAB" && d.seatGrade !== selectedSeat && d.seatGrade !== "ALL") {
-          return false;
-        }
         if (unconditionalOnly && !d.isUnconditional) return false;
+        if (selectedTag && !d.conditionTags.includes(selectedTag)) return false;
         return true;
       })
-      .sort(compareDealsForDisplay);
-  }, [deals, selectedSeat, unconditionalOnly]);
+      .sort(sortAllDealsUnconditionalFirst);
+  }, [seatFiltered, unconditionalOnly, selectedTag]);
 
   const { generalLowest, conditionalLowest } = useMemo(
-    () => summarizeLowestDeals(visible),
-    [visible],
+    () => summarizeLowestDeals(seatFiltered),
+    [seatFiltered],
   );
-  const topDeal = visible[0] ?? null;
+  const headlineDeal = generalLowest ?? visible[0] ?? null;
   const seatLabel = selectedSeat === "ALL_TAB" ? "전체 좌석" : SEAT_GRADE_LABELS[selectedSeat];
 
   return (
@@ -82,13 +111,18 @@ export function ShowComparePanel({
       <div className="flex flex-col gap-6 lg:col-span-8">
         {headerSlot}
 
-        {/* Multi-Channel Price Comparison Section (mudeal_3 parity) */}
+        {/* Multi-Channel Full Discount Comparison Section */}
         <section
           id="price-compare"
           className="flex flex-col gap-5 rounded-lg border border-outline bg-surface p-6"
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-xl font-semibold text-on-surface">예매처별 실시간 가격 비교</h2>
+            <h2 className="text-xl font-semibold text-on-surface">
+              예매처별 전체 할인 비교
+              <span className="ml-2 text-sm font-medium text-muted tabular-nums">
+                ({visible.length}건)
+              </span>
+            </h2>
             <span className="text-[13px] text-muted tabular-nums">
               {formatKstDateTime(lastVerifiedAt)} 확인 (KST)
             </span>
@@ -186,25 +220,82 @@ export function ShowComparePanel({
             </div>
           </div>
 
-          {/* Comparison Table (mudeal_3 table parity) */}
+          {/* Interactive Discount Condition Filter Chips (all discounts shown by default) */}
+          {seatFiltered.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="할인 조건 필터">
+              <button
+                type="button"
+                onClick={() => {
+                  setUnconditionalOnly(false);
+                  setSelectedTag(null);
+                }}
+                className={`h-8 rounded-xs border px-3 text-xs font-semibold transition-colors ${
+                  !unconditionalOnly && !selectedTag
+                    ? "border-secondary bg-rose-mist text-primary"
+                    : "border-outline bg-surface text-on-surface-variant hover:bg-surface-sunken"
+                }`}
+              >
+                전체 할인 ({seatFiltered.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setUnconditionalOnly((prev) => !prev);
+                  setSelectedTag(null);
+                }}
+                className={`h-8 rounded-xs border px-3 text-xs font-semibold transition-colors ${
+                  unconditionalOnly
+                    ? "border-secondary bg-rose-mist text-primary"
+                    : "border-outline bg-surface text-on-surface-variant hover:bg-surface-sunken"
+                }`}
+              >
+                무조건 할인 ({unconditionalCount})
+              </button>
+              {availableTags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => {
+                    setUnconditionalOnly(false);
+                    setSelectedTag((prev) => (prev === tag ? null : tag));
+                  }}
+                  className={`h-8 rounded-xs border px-3 text-xs font-semibold transition-colors ${
+                    selectedTag === tag
+                      ? "border-secondary bg-rose-mist text-primary"
+                      : "border-outline bg-surface text-on-surface-variant hover:bg-surface-sunken"
+                  }`}
+                >
+                  {CONDITION_TAG_LABELS[tag]}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Comparison Table (all discounts exposed for direct booking selection) */}
           {visible.length === 0 ? (
             <p className="rounded-md bg-surface-variant p-6 text-center text-sm text-muted">
-              선택한 좌석에 진행 중인 할인이 없어요. 다른 좌석이나 조건을 확인해 보세요.
+              선택한 좌석·조건에 진행 중인 할인이 없어요. 다른 좌석이나 전체 할인을 확인해 보세요.
             </p>
           ) : (
             <div className="w-full overflow-x-auto rounded-lg border border-outline">
               <table className="w-full min-w-[560px] border-collapse text-left">
                 <thead className="border-b border-outline bg-surface-sunken text-[13px] font-semibold text-on-surface-variant">
                   <tr>
-                    <th scope="col" className="px-4 py-3">예매처 · 출처</th>
-                    <th scope="col" className="px-4 py-3">할인 조건</th>
+                    <th scope="col" className="px-4 py-3">예매처 · 좌석</th>
+                    <th scope="col" className="px-4 py-3">할인 종류 · 조건</th>
                     <th scope="col" className="px-4 py-3 text-right">할인율 · 최종가</th>
-                    <th scope="col" className="px-4 py-3 text-right">이동</th>
+                    <th scope="col" className="px-4 py-3 text-right">예매</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-outline">
                   {visible.map((deal, idx) => {
-                    const isBest = idx === 0;
+                    const isBest = idx === 0 && deal.salePrice !== null;
+                    const tierLabel =
+                      deal.dealType === "LOTTERY"
+                        ? "로터리 추첨"
+                        : deal.isUnconditional
+                          ? "무조건"
+                          : "조건부";
                     return (
                       <tr
                         key={deal.id}
@@ -222,7 +313,7 @@ export function ShowComparePanel({
                               </span>
                               {isBest && (
                                 <span className="rounded-xs border border-champagne-gold bg-surface px-2 py-0 text-xs font-semibold text-on-surface">
-                                  {deal.isUnconditional ? "최저가" : "조건부 최저가"}
+                                  {deal.isUnconditional ? "무조건 최저가" : "조건부 최저가"}
                                 </span>
                               )}
                               {deal.sourceType === "USER_REPORT" && (
@@ -232,9 +323,12 @@ export function ShowComparePanel({
                               )}
                             </div>
                             <span className="text-[13px] text-muted tabular-nums">
+                              {SEAT_GRADE_LABELS[deal.seatGrade]}
                               {deal.sourceType === "USER_REPORT"
-                                ? `${deal.clickCount}명 확인 · 도움 ${deal.helpfulCount}`
-                                : deal.feeInfo ?? SEAT_GRADE_LABELS[deal.seatGrade]}
+                                ? ` · ${deal.clickCount}명 확인 · 도움 ${deal.helpfulCount}`
+                                : deal.feeInfo
+                                  ? ` · ${deal.feeInfo}`
+                                  : ""}
                             </span>
                             {deal.sourceType === "USER_REPORT" && (
                               <div className="pt-0.5">
@@ -250,11 +344,19 @@ export function ShowComparePanel({
                                 className={`rounded-xs px-2 py-0 text-xs font-semibold ${
                                   deal.isUnconditional
                                     ? "bg-rose-mist text-primary"
-                                    : "bg-surface-sunken text-on-surface-variant"
+                                    : deal.dealType === "LOTTERY"
+                                      ? "border border-champagne-gold bg-gold-wash text-on-surface"
+                                      : "bg-surface-sunken text-on-surface-variant"
                                 }`}
                               >
-                                {deal.isUnconditional ? "무조건" : "추첨/조건부"}
+                                {tierLabel}
                               </span>
+                              {(deal.dealType === "SPECIAL_DAY" || deal.dealType === "TIMESALE") &&
+                                deal.isUnconditional && (
+                                  <span className="rounded-xs bg-surface-sunken px-2 py-0 text-xs font-semibold text-on-surface-variant">
+                                    {DEAL_TYPE_LABELS[deal.dealType]}
+                                  </span>
+                                )}
                               {deal.conditionTags.map((tag) => (
                                 <span
                                   key={tag}
@@ -270,22 +372,35 @@ export function ShowComparePanel({
                           </div>
                         </td>
                         <td className="px-4 py-4 text-right tabular-nums">
-                          <div className="flex items-baseline justify-end gap-2">
-                            {deal.discountRate !== null && (
-                              <span className="text-lg font-bold text-secondary">
-                                {deal.discountRate}%
+                          <div className="flex flex-col items-end gap-0.5">
+                            <div className="flex items-baseline justify-end gap-2">
+                              {deal.discountRate !== null && (
+                                <span className="text-lg font-bold text-secondary">
+                                  {deal.discountRate}%
+                                </span>
+                              )}
+                              <span className="text-lg font-bold text-on-surface">
+                                {deal.salePrice !== null
+                                  ? formatKrw(deal.salePrice)
+                                  : deal.dealType === "LOTTERY"
+                                    ? "로터리 응모"
+                                    : "할인"}
                               </span>
-                            )}
-                            <span className="text-lg font-bold text-on-surface">
-                              {deal.salePrice !== null ? formatKrw(deal.salePrice) : "할인"}
-                            </span>
+                            </div>
+                            {deal.basePrice !== null &&
+                              deal.salePrice !== null &&
+                              deal.basePrice > deal.salePrice && (
+                                <span className="text-xs text-hint line-through">
+                                  {formatKrw(deal.basePrice)}
+                                </span>
+                              )}
                           </div>
                         </td>
                         <td className="px-4 py-4 text-right">
                           <OutboundButton
                             dealId={deal.id}
                             externalUrl={deal.externalUrl}
-                            label={`${deal.channelName} 이동 ↗`}
+                            label={`${deal.channelName} 예매 ↗`}
                             variant={isBest ? "primary" : "secondary"}
                           />
                         </td>
@@ -299,30 +414,36 @@ export function ShowComparePanel({
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-muted">{disclaimer}</p>
-            {topDeal && <FlagDealIssueButton dealId={topDeal.id} />}
+            {headlineDeal && <FlagDealIssueButton dealId={headlineDeal.id} />}
           </div>
         </section>
 
         {belowCompareSlot}
       </div>
 
-      {/* Right Sticky Price & CTA Sidebar (4/12, mudeal_3 parity) */}
+      {/* Right Sticky Price & CTA Sidebar (4/12, headlines unconditional lowest by default) */}
       <aside className="flex flex-col gap-5 rounded-lg border border-outline bg-surface p-6 lg:sticky lg:top-28 lg:col-span-4">
         <div className="flex flex-col gap-1 border-b border-outline pb-4">
-          <span className="text-xs font-semibold text-muted">선택 좌석 최저가 ({seatLabel})</span>
-          {topDeal ? (
+          <span className="text-xs font-semibold text-muted">
+            {generalLowest ? `무조건 최저가 (${seatLabel})` : `선택 좌석 최저가 (${seatLabel})`}
+          </span>
+          {headlineDeal ? (
             <>
               <div className="flex items-baseline gap-2 tabular-nums">
-                {topDeal.discountRate !== null && (
-                  <span className="text-2xl font-bold text-secondary">{topDeal.discountRate}%</span>
+                {headlineDeal.discountRate !== null && (
+                  <span className="text-2xl font-bold text-secondary">{headlineDeal.discountRate}%</span>
                 )}
                 <span className="text-2xl font-bold text-on-surface">
-                  {topDeal.salePrice !== null ? formatKrw(topDeal.salePrice) : "할인"}
+                  {headlineDeal.salePrice !== null
+                    ? formatKrw(headlineDeal.salePrice)
+                    : headlineDeal.dealType === "LOTTERY"
+                      ? "로터리 응모"
+                      : "할인"}
                 </span>
               </div>
-              {topDeal.basePrice && (
+              {headlineDeal.basePrice && (
                 <span className="text-[13px] text-muted line-through tabular-nums">
-                  정가 {formatKrw(topDeal.basePrice)}
+                  정가 {formatKrw(headlineDeal.basePrice)}
                 </span>
               )}
             </>
@@ -335,7 +456,10 @@ export function ShowComparePanel({
           <input
             type="checkbox"
             checked={unconditionalOnly}
-            onChange={(e) => setUnconditionalOnly(e.target.checked)}
+            onChange={(e) => {
+              setUnconditionalOnly(e.target.checked);
+              if (e.target.checked) setSelectedTag(null);
+            }}
             className="h-4 w-4 rounded-xs border-outline-strong accent-primary"
           />
           <span>무조건 할인만 보기</span>
@@ -357,7 +481,7 @@ export function ShowComparePanel({
                   <span
                     className={`text-xs ${d.isUnconditional ? "text-primary" : "text-muted"}`}
                   >
-                    {d.isUnconditional ? "무조건 할인" : "추첨 · 조건부"}
+                    {d.isUnconditional ? "무조건 할인" : d.dealType === "LOTTERY" ? "로터리 추첨" : "조건부 할인"}
                   </span>
                 </div>
                 <span className="text-[15px] font-semibold text-on-surface tabular-nums">
@@ -365,7 +489,9 @@ export function ShowComparePanel({
                     ? formatKrw(d.salePrice)
                     : d.discountRate !== null
                       ? `${d.discountRate}% 할인`
-                      : "할인"}
+                      : d.dealType === "LOTTERY"
+                        ? "추첨"
+                        : "할인"}
                 </span>
               </div>
             ))}
@@ -373,11 +499,11 @@ export function ShowComparePanel({
         )}
 
         <div className="flex flex-col gap-2 pt-1">
-          {topDeal && (
+          {headlineDeal && (
             <OutboundButton
-              dealId={topDeal.id}
-              externalUrl={topDeal.externalUrl}
-              label={`${topDeal.channelName}에서 최저가 보기 ↗`}
+              dealId={headlineDeal.id}
+              externalUrl={headlineDeal.externalUrl}
+              label={`${headlineDeal.channelName}에서 예매하기 ↗`}
               variant="primary"
               className="h-12 w-full text-[15px]"
             />

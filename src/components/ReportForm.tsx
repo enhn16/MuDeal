@@ -33,6 +33,8 @@ export function ReportForm({
   const [reportedDiscountRate, setReportedDiscountRate] = useState("");
   const [isUnconditional, setIsUnconditional] = useState(true);
   const [conditionNote, setConditionNote] = useState("");
+  const [eventStartDate, setEventStartDate] = useState("");
+  const [eventEndDate, setEventEndDate] = useState("");
   const [reporterNickname, setReporterNickname] = useState(defaultNickname);
   const [draftSaved, setDraftSaved] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -83,6 +85,21 @@ export function ReportForm({
         return;
       }
 
+      const datePrefix =
+        category !== "deal" && eventStartDate
+          ? eventEndDate && eventEndDate > eventStartDate
+            ? `${eventStartDate} ~ ${eventEndDate}`
+            : eventStartDate
+          : "";
+      const mergedConditionNote =
+        datePrefix && conditionNote.trim()
+          ? `[${datePrefix}] ${conditionNote.trim()}`
+          : datePrefix || conditionNote.trim() || null;
+      const computedExpiresAt =
+        category !== "deal" && (eventEndDate || eventStartDate)
+          ? new Date(`${eventEndDate || eventStartDate}T23:59:59+09:00`).toISOString()
+          : null;
+
       const res = await fetch("/api/v1/reports", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -96,7 +113,8 @@ export function ReportForm({
           reportedPrice: reportedPrice ? Number(reportedPrice) : null,
           reportedDiscountRate: reportedDiscountRate ? Number(reportedDiscountRate) : null,
           isUnconditional,
-          conditionNote: conditionNote || null,
+          conditionNote: mergedConditionNote,
+          expiresAt: computedExpiresAt,
           reporterNickname: reporterNickname || defaultNickname,
         }),
       });
@@ -317,6 +335,37 @@ export function ReportForm({
               />
               무조건 할인 (조건 없음)
             </label>
+          </div>
+        </div>
+      )}
+
+      {/* 4-2. 이벤트 · 특전 진행 날짜 (특전 / 싱어롱·커튼콜일 때) */}
+      {category !== "deal" && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="report-event-start" className="text-[13px] font-semibold text-on-surface">
+              진행 날짜 · 시작일 (선택)
+            </label>
+            <input
+              id="report-event-start"
+              type="date"
+              value={eventStartDate}
+              onChange={(e) => setEventStartDate(e.target.value)}
+              className="h-10 rounded-sm border border-outline bg-surface-variant px-3 text-sm text-on-surface tabular-nums focus:border-secondary focus:bg-surface focus:outline-none"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="report-event-end" className="text-[13px] font-semibold text-on-surface">
+              종료일 (기간 진행 시 선택)
+            </label>
+            <input
+              id="report-event-end"
+              type="date"
+              min={eventStartDate || undefined}
+              value={eventEndDate}
+              onChange={(e) => setEventEndDate(e.target.value)}
+              className="h-10 rounded-sm border border-outline bg-surface-variant px-3 text-sm text-on-surface tabular-nums focus:border-secondary focus:bg-surface focus:outline-none"
+            />
           </div>
         </div>
       )}

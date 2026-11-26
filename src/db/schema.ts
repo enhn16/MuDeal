@@ -36,8 +36,12 @@ export const CONDITION_TAGS = [
   "MATINEE",
   "REWATCH",
   "YOUTH_STUDENT",
+  "MILITARY_PUBLIC",
   "OFFICE_WORKER",
+  "LOCAL_RESIDENT",
+  "GROUP_PACKAGE",
   "CARD_PARTNER",
+  "EVENT_CONDITION",
 ] as const;
 export type ConditionTag = (typeof CONDITION_TAGS)[number];
 
@@ -86,6 +90,9 @@ export const shows = sqliteTable(
     subRegion: text("sub_region", { enum: SUB_REGIONS }).notNull(),
     startDate: text("start_date").notNull(), // YYYY-MM-DD (KST)
     endDate: text("end_date").notNull(), // YYYY-MM-DD (KST)
+    synopsis: text("synopsis"),
+    synopsisImageUrl: text("synopsis_image_url"),
+    channelLinksJson: text("channel_links_json"),
     basePricesJson: text("base_prices_json"),
     minActivePrice: integer("min_active_price"),
     maxDiscountRate: integer("max_discount_rate"),
@@ -107,6 +114,8 @@ export const actors = sqliteTable(
     id: integer("id").primaryKey({ autoIncrement: true }),
     name: text("name").notNull(),
     normalizedName: text("normalized_name").notNull(),
+    externalPlaydbId: text("external_playdb_id").unique(),
+    profileImageUrl: text("profile_image_url"),
     disambiguationNote: text("disambiguation_note"),
     followerCount: integer("follower_count").notNull().default(0),
     createdAt: text("created_at").notNull().default(nowIso()),
@@ -127,7 +136,7 @@ export const showActors = sqliteTable(
       .notNull()
       .references(() => actors.id, { onDelete: "cascade" }),
     roleName: text("role_name"),
-    sourceType: text("source_type", { enum: ["KOPIS", "ADMIN"] }).notNull().default("KOPIS"),
+    sourceType: text("source_type", { enum: ["KOPIS", "NOL", "YES24", "ADMIN"] }).notNull().default("KOPIS"),
     createdAt: text("created_at").notNull().default(nowIso()),
   },
   (t) => [

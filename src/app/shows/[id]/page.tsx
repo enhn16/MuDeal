@@ -2,12 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getRuntimeDb } from "@/db/client";
+import { ActorAvatar } from "@/components/ActorAvatar";
 import { ShareLinkButton } from "@/components/DealActions";
 import { FollowActorButton, WishButton } from "@/components/PersonalButtons";
 import { PosterArtwork } from "@/components/ShowCard";
 import { ShowComparePanel } from "@/components/ShowComparePanel";
+import { ShowSynopsis } from "@/components/ShowSynopsis";
 import { TargetNewsFeed } from "@/components/TargetNewsFeed";
-import { formatKstDate, formatShowPeriod } from "@/lib/kst";
+import { formatEventDates, formatEventDateWithDow, formatKstDate, formatShowPeriod } from "@/lib/kst";
 import { DEAL_TYPE_LABELS, SUB_REGION_LABELS } from "@/lib/labels";
 import { formatKrw } from "@/lib/pricing";
 import { getServerSession } from "@/server/modules/auth-runtime";
@@ -124,6 +126,7 @@ export default async function ShowDetailPage({ params }: { params: ShowRoutePara
           )}
         </div>
       </div>
+      <ShowSynopsis synopsis={data.show.synopsis} />
     </section>
   );
 
@@ -143,6 +146,12 @@ export default async function ShowDetailPage({ params }: { params: ShowRoutePara
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {data.events.map((ev) => {
               const isPerk = ev.dealType === "PERK_GOODS";
+              const formattedDates = formatEventDates(ev.eventDates, "full");
+              const fallbackExpiry =
+                !formattedDates && ev.expiresAt
+                  ? `~${formatEventDateWithDow(formatKstDate(new Date(ev.expiresAt)))}까지`
+                  : null;
+              const dateLabel = formattedDates ?? fallbackExpiry;
               return (
                 <div
                   key={ev.id}
@@ -160,10 +169,16 @@ export default async function ShowDetailPage({ params }: { params: ShowRoutePara
                     >
                       {DEAL_TYPE_LABELS[ev.dealType]}
                     </span>
-                    <span className="text-xs text-muted tabular-nums">
-                      {ev.eventDates[0] ?? ev.channelName}
-                    </span>
+                    <span className="text-xs text-muted">{ev.channelName}</span>
                   </div>
+                  {dateLabel && (
+                    <p className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary tabular-nums">
+                      <span className="material-symbols-outlined text-[15px] leading-none" aria-hidden="true">
+                        calendar_month
+                      </span>
+                      <span>{dateLabel}</span>
+                    </p>
+                  )}
                   <h3 className="text-[15px] font-semibold text-on-surface">
                     {ev.conditionSummary ?? DEAL_TYPE_LABELS[ev.dealType]}
                   </h3>
@@ -198,15 +213,11 @@ export default async function ShowDetailPage({ params }: { params: ShowRoutePara
                   className="flex items-center justify-between gap-3 rounded-sm border border-outline bg-surface p-3"
                 >
                   <Link href={`/actors/${actor.id}`} className="group flex min-w-0 items-center gap-3">
-                    <span
-                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-sm text-sm font-bold ${
-                        isFollowed
-                          ? "bg-curtain-noir text-gold-soft"
-                          : "bg-surface-sunken text-primary"
-                      }`}
-                    >
-                      {actor.name.slice(0, 1)}
-                    </span>
+                    <ActorAvatar
+                      name={actor.name}
+                      profileImageUrl={actor.profileImageUrl}
+                      isFollowed={isFollowed}
+                    />
                     <div className="flex min-w-0 flex-col">
                       <span className="truncate text-[15px] font-semibold text-on-surface group-hover:text-primary">
                         {actor.name}

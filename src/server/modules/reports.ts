@@ -13,7 +13,7 @@ import {
   type SeatGrade,
 } from "@/db/schema";
 import { AppError } from "@/lib/errors";
-import { isExpired, startOfKstDayUtc } from "@/lib/kst";
+import { isExpired, normalizeEventDates, startOfKstDayUtc } from "@/lib/kst";
 import { calcDiscountRate } from "@/lib/pricing";
 import { parseSafeExternalUrl } from "@/lib/url";
 import type { AuthUser } from "./auth";
@@ -44,9 +44,12 @@ export async function recomputeShowPriceCache(db: AppDb, showId: number, now = n
     .where(and(eq(deals.showId, showId), eq(deals.status, "ACTIVE")));
 
   const activePriced = rows.filter((d) => !isExpired(d.expiresAt, now) && d.salePrice !== null);
+  const unconditionalPriced = activePriced.filter((d) => d.isUnconditional === 1);
+  // Default headline price reflects unconditional discounts first; falls back to conditional only if none exist.
+  const headlinePool = unconditionalPriced.length > 0 ? unconditionalPriced : activePriced;
   const minActivePrice =
-    activePriced.length > 0 ? Math.min(...activePriced.map((d) => d.salePrice!)) : null;
-  const rates = activePriced
+    headlinePool.length > 0 ? Math.min(...headlinePool.map((d) => d.salePrice!)) : null;
+  const rates = headlinePool
     .map((d) => d.discountRate)
     .filter((r): r is number => r !== null);
   const maxDiscountRate = rates.length > 0 ? Math.max(...rates) : null;
@@ -238,13 +241,30 @@ export async function approveUserReport(
       ? overrides.discountRate
       : (calcDiscountRate(basePrice, salePrice) ?? report.reportedDiscountRate);
   const displayNickname = overrides.maskNickname ? "익명의 관객" : report.reporterNickname;
+  const finalDealType = overrides.dealType ?? report.dealType;
+  const finalConditionSummary =
+    overrides.conditionSummary !== undefined ? overrides.conditionSummary : report.conditionNote;
+  const isEventOrPerk =
+    finalDealType === "PERK_GOODS" ||
+    finalDealType === "SINGALONG" ||
+    finalDealType === "CURTAIN_CALL" ||
+    finalDealType === "SPECIAL_DAY";
+  const parsedEventDates = isEventOrPerk
+    ? normalizeEventDates([], {
+        showStartDate: show.startDate,
+        showEndDate: show.endDate,
+        fallbackText: finalConditionSummary,
+        now,
+      })
+    : [];
+  const latestEventDate = parsedEventDates.at(-1) ?? null;
 
   const [published] = await db
     .insert(deals)
     .values({
       showId: show.id,
       channelName: overrides.channelName?.trim() || report.channelName,
-      dealType: overrides.dealType ?? report.dealType,
+      dealType: finalDealType,
       seatGrade: overrides.seatGrade ?? report.seatGrade,
       basePrice,
       salePrice,
@@ -255,10 +275,13 @@ export async function approveUserReport(
             ? 1
             : 0
           : report.isUnconditional,
-      conditionSummary:
-        overrides.conditionSummary !== undefined ? overrides.conditionSummary : report.conditionNote,
+      conditionSummary: finalConditionSummary,
+      perkSummary: finalDealType === "PERK_GOODS" ? finalConditionSummary : null,
+      eventDatesJson: parsedEventDates.length > 0 ? JSON.stringify(parsedEventDates) : null,
       externalUrl: report.externalUrl,
-      expiresAt: report.expiresAt,
+      expiresAt:
+        report.expiresAt ??
+        (latestEventDate ? new Date(`${latestEventDate}T23:59:59+09:00`).toISOString() : null),
       status: "ACTIVE",
       sourceType: "USER_REPORT",
       sourceReportId: report.id,

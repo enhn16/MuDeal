@@ -28,18 +28,19 @@ export default async function HomePage() {
                 <img
                   src={hero.imageUrl}
                   alt={hero.title}
-                  className="absolute inset-0 h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
+                  referrerPolicy="no-referrer"
+                  className="absolute inset-0 h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-105"
                 />
               )}
               <div className="hero-scrim absolute inset-0" />
-              <div className="relative z-10 flex flex-col gap-1">
+              <div className="relative z-10 flex flex-col gap-1 drop-shadow-[0_1px_6px_rgba(0,0,0,0.75)]">
                 {hero.eyebrow && (
-                  <span className="text-xs font-semibold tracking-wider text-gold-wash uppercase">
+                  <span className="text-xs font-semibold tracking-wider text-gold-soft uppercase">
                     {hero.eyebrow}
                   </span>
                 )}
-                <h2 className="text-xl font-semibold leading-snug text-balance">{hero.title}</h2>
-                {hero.subtitle && <p className="text-[13px] text-white/85">{hero.subtitle}</p>}
+                <h2 className="text-xl font-bold leading-snug text-white text-balance">{hero.title}</h2>
+                {hero.subtitle && <p className="text-[13px] text-white/90">{hero.subtitle}</p>}
               </div>
             </Link>
           ))}
@@ -76,11 +77,20 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* 4. 관객들이 제보해주신 딜 */}
-      {data.communityDeals.length > 0 && (
-        <section id="community-deals" className="mx-auto max-w-[1100px] px-5 pt-[72px] lg:px-0">
-          <div className="mb-5 flex flex-wrap items-baseline justify-between gap-3">
-            <h2 className="text-xl font-semibold text-on-surface">관객들이 제보해주신 딜</h2>
+      {/* 4. 관객들이 제보해주신 딜 (항상 노출) */}
+      <section id="community-deals" className="mx-auto max-w-[1100px] px-5 pt-[72px] lg:px-0">
+        <div className="mb-5 flex flex-wrap items-baseline justify-between gap-3">
+          <h2 className="text-xl font-semibold text-on-surface">관객들이 제보해주신 딜</h2>
+          <div className="flex items-center gap-4">
+            <Link
+              href="/search?source=USER_REPORT"
+              className="inline-flex items-center gap-0.5 text-[13px] font-semibold text-on-surface-variant hover:text-primary"
+            >
+              <span>전체보기</span>
+              <span className="material-symbols-outlined text-base" aria-hidden="true">
+                chevron_right
+              </span>
+            </Link>
             <Link
               href="/reports/new"
               className="inline-flex items-center gap-1 text-[13px] font-semibold text-primary hover:text-secondary"
@@ -91,7 +101,27 @@ export default async function HomePage() {
               </span>
             </Link>
           </div>
+        </div>
 
+        {data.communityDeals.length === 0 ? (
+          <div className="flex flex-col items-center gap-2.5 rounded-lg border border-outline bg-surface-variant px-6 py-10 text-center">
+            <p className="text-[15px] font-semibold text-on-surface">
+              아직 등록된 관객 제보 딜이 없어요
+            </p>
+            <p className="text-[13px] text-muted">
+              알고 계신 타임세일·로터리·싱어롱·특전 소식을 제보해 주시면 검수 후 닉네임과 함께 올라가요.
+            </p>
+            <Link
+              href="/reports/new"
+              className="mt-2 inline-flex h-10 items-center gap-1 rounded-sm bg-secondary px-5 text-sm font-semibold text-on-secondary shadow-cta hover:bg-secondary-hover"
+            >
+              <span>첫 번째 할인 제보하기</span>
+              <span className="material-symbols-outlined text-base" aria-hidden="true">
+                arrow_forward
+              </span>
+            </Link>
+          </div>
+        ) : (
           <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
             {data.communityDeals.slice(0, 3).map((deal) => (
               <article
@@ -135,8 +165,8 @@ export default async function HomePage() {
               </article>
             ))}
           </div>
-        </section>
-      )}
+        )}
+      </section>
     </div>
   );
 }

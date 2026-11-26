@@ -27,6 +27,8 @@ const CATEGORY_TABS: Array<{
   },
 ];
 
+const MAX_HOME_ROWS_ITEMS = 10; // 5-col desktop grid × 2 rows max
+
 export function HomeDealFilterGrid({ shows }: { shows: ShowCardItem[] }) {
   const [active, setActive] = useState<HomeCategory>("DISCOUNT");
 
@@ -37,6 +39,8 @@ export function HomeDealFilterGrid({ shows }: { shows: ShowCardItem[] }) {
   };
 
   const filtered = shows.filter((s) => s.categories.includes(active));
+  const visibleShows = filtered.slice(0, MAX_HOME_ROWS_ITEMS);
+  const remainingCount = Math.max(0, filtered.length - visibleShows.length);
   const currentTab = CATEGORY_TABS.find((t) => t.key === active)!;
 
   return (
@@ -100,11 +104,27 @@ export function HomeDealFilterGrid({ shows }: { shows: ShowCardItem[] }) {
           </Link>
         </div>
       ) : (
-        <div className="grid grid-cols-2 items-stretch gap-x-4 gap-y-8 sm:grid-cols-3 lg:grid-cols-5 lg:gap-x-5">
-          {filtered.map((show) => (
-            <ShowCard key={`${active}-${show.id}`} show={show} viewCategory={active} />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-2 items-stretch gap-x-4 gap-y-8 sm:grid-cols-3 lg:grid-cols-5 lg:gap-x-5">
+            {visibleShows.map((show) => (
+              <ShowCard key={`${active}-${show.id}`} show={show} viewCategory={active} />
+            ))}
+          </div>
+
+          {remainingCount > 0 && (
+            <div className="mt-7 flex justify-center">
+              <Link
+                href={`/search?category=${active}`}
+                className="inline-flex h-11 items-center gap-1 rounded-sm border border-outline-strong bg-surface px-6 text-sm font-semibold text-on-surface transition-colors hover:border-primary hover:bg-surface-variant hover:text-primary"
+              >
+                <span>조건 검색에서 {currentTab.label} 전체 {filtered.length}편 보기</span>
+                <span className="material-symbols-outlined text-base" aria-hidden="true">
+                  chevron_right
+                </span>
+              </Link>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

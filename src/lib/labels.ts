@@ -41,11 +41,15 @@ export const DEAL_TYPE_LABELS: Record<DealType, string> = {
 };
 
 export const CONDITION_TAG_LABELS: Record<ConditionTag, string> = {
-  MATINEE: "마티네",
-  REWATCH: "재관람",
-  YOUTH_STUDENT: "청년·학생",
+  MATINEE: "마티네(낮공)",
+  REWATCH: "재관람·마니아",
+  YOUTH_STUDENT: "학생·수험생",
+  MILITARY_PUBLIC: "군인·공무원",
   OFFICE_WORKER: "직장인",
+  LOCAL_RESIDENT: "지역주민",
+  GROUP_PACKAGE: "패키지·다인",
   CARD_PARTNER: "카드·제휴",
+  EVENT_CONDITION: "기타 조건",
 };
 
 export const SEAT_GRADE_LABELS: Record<SeatGrade, string> = {

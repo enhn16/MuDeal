@@ -18,6 +18,9 @@ function makeShow(overrides: Partial<ShowRow>): ShowRow {
     subRegion: "DAEHAKRO",
     startDate: "2026-11-01",
     endDate: "2027-01-31",
+    synopsis: null,
+    synopsisImageUrl: null,
+    channelLinksJson: null,
     basePricesJson: '{"R":70000}',
     minActivePrice: 38500,
     maxDiscountRate: 45,
@@ -191,5 +194,44 @@ describe("4-axis show search filter", () => {
     expect(filterShowsWithDeals(multiDealDataset, { category: "DISCOUNT" }, now).map((s) => s.id)).toEqual([10]);
     expect(filterShowsWithDeals(multiDealDataset, { category: "PERK" }, now).map((s) => s.id)).toEqual([10, 11]);
     expect(filterShowsWithDeals(multiDealDataset, { category: "EVENT" }, now).map((s) => s.id)).toEqual([10]);
+  });
+
+  it("headlines unconditional discount price by default and switches to conditional price when filtered by condition tag", () => {
+    const mixedDataset = [
+      {
+        show: makeShow({ id: 30, title: "뮤지컬 <여신님이 보고 계셔>" }),
+        deals: [
+          makeDeal({
+            id: 301,
+            showId: 30,
+            basePrice: 88000,
+            salePrice: 61600,
+            discountRate: 30,
+            isUnconditional: 1,
+            conditionTagsJson: null,
+            conditionSummary: "오프닝 위크 할인 30%",
+          }),
+          makeDeal({
+            id: 302,
+            showId: 30,
+            basePrice: 88000,
+            salePrice: 52800,
+            discountRate: 40,
+            isUnconditional: 0,
+            conditionTagsJson: '["MILITARY_PUBLIC"]',
+            conditionSummary: "군인 할인(1인2매/증빙지참) 40%",
+          }),
+        ],
+        actorNames: [],
+      },
+    ];
+
+    const defaultCards = filterShowsWithDeals(mixedDataset, {}, now);
+    expect(defaultCards[0].lowestPrice).toBe(61600);
+    expect(defaultCards[0].isUnconditional).toBe(true);
+
+    const militaryCards = filterShowsWithDeals(mixedDataset, { conditionTags: ["MILITARY_PUBLIC"] }, now);
+    expect(militaryCards[0].lowestPrice).toBe(52800);
+    expect(militaryCards[0].isUnconditional).toBe(false);
   });
 });
