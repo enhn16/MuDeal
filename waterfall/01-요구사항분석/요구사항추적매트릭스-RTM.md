@@ -7,8 +7,8 @@
 |------|------|
 | 프로젝트명 | MuDeal |
 | 문서 번호 | RTM-MUDEAL-v1.2 |
-| 버전 | v1.2 (Phase 4~5 구현·검증 완료) |
-| 작성일 | 2026-11-25 |
+| 버전 | v1.3 (Phase 4~5 구현·QA·토스 UX 점검·일반 티켓오픈 제거 반영) |
+| 작성일 | 2026-11-26 |
 | SRS 기준선 · 대상 릴리스 | `SRS-MUDEAL-v1.1` / MVP v1.0 |
 
 ---
@@ -18,8 +18,8 @@
 | FR-ID · 요구사항명 | 우선순위 | 설계 위치 | 구현 코드 위치 | 검증 테스트 | 판정 |
 |---|---|---|---|---|---|
 | **FR-001** KOPIS·채널 저빈도 배치·Vision/OCR·자동마감 | P1 | `DD-006` | `src/server/sync/{kopis,channels,ocr,expiry}.ts`, `worker/index.ts`, `src/app/api/v1/admin/sync/*`, `/ocr-jobs/*` | `src/server/sync/__tests__/sync.test.ts` (6 tests) | **통과** |
-| **FR-002** 홈 추천 · 티켓오픈 임박 · 제보해주신 딜 | P1 | `DD-002, DD-008` | `src/app/page.tsx`, `src/app/api/v1/home/route.ts`, `/community-deals/route.ts` | 라이브 `200 OK` + `shows.test.ts` | **통과** |
-| **FR-003** 4축 복합 필터 검색 · 프리셋 · 동적 OG | P1 | `DD-002, DD-005` | `src/app/search/page.tsx`, `src/server/modules/shows.ts`, `src/app/api/v1/shows/*` | `shows.test.ts` (3 tests) + `core.test.ts` | **통과** |
+| **FR-002** 홈 3분류(할인·특전·싱어롱/커튼콜) · 마감임박 · 제보해주신 딜 | P1 | `DD-002, DD-008` | `src/app/page.tsx`, `src/components/{HomeDealFilterGrid,ShowCard}.tsx`, `src/app/api/v1/home/route.ts`, `/community-deals/route.ts` | 라이브 QA 25/25 + `shows.test.ts` | **통과** |
+| **FR-003** 4축 복합 필터 검색 · 카테고리 · 프리셋 · 동적 OG | P1 | `DD-002, DD-005` | `src/app/search/page.tsx`, `src/server/modules/shows.ts`, `src/app/api/v1/shows/*` | `shows.test.ts` (4 tests) + `core.test.ts` | **통과** |
 | **FR-004** 작품 상세 가격 비교 · 이벤트/특전 · 출연 배우 | P1 | `DD-002, DD-008` | `src/app/shows/[id]/page.tsx`, `src/app/actors/[id]/page.tsx`, `src/components/ShowComparePanel.tsx` | `core.test.ts` (할인율·정렬) + 라이브 `200 OK` | **통과** |
 | **FR-005** 외부 예매처 이동 및 10초 중복 제거 집계 | P1 | `DD-003` | `src/server/modules/deals.ts`, `src/app/api/v1/deals/[id]/clicks/route.ts`, `src/components/DealActions.tsx` | `core.test.ts` (URL 검증) + `build` | **통과** |
 | **FR-006** 회원 전용 제보(URL 필수 · 일 10건) & 도움 반응 | P1 | `DD-003, DD-004` | `src/app/reports/new/page.tsx`, `src/server/modules/reports.ts`, `/api/v1/reports`, `/uploads/report-evidence`, `/helpful` | `reports.test.ts` (400/429) + 라이브 `200 OK` | **통과** |

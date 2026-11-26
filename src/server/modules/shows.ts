@@ -19,6 +19,30 @@ import { calcKstDDay, isExpired, resolveDatePreset } from "@/lib/kst";
 import { compareDealsForDisplay, summarizeLowestDeals } from "@/lib/pricing";
 
 export type ShowSort = "LOWEST_PRICE" | "HIGHEST_DISCOUNT" | "CLOSING_SOON" | "POPULAR";
+export type HomeCategory = "DISCOUNT" | "PERK" | "EVENT";
+
+export const HOME_CATEGORIES: readonly HomeCategory[] = ["DISCOUNT", "PERK", "EVENT"] as const;
+
+const DISCOUNT_DEAL_TYPES = new Set<DealType>([
+  "TIMESALE",
+  "LOTTERY",
+  "DISCOUNT_SITE",
+  "CARD_EVENT",
+  "SPECIAL_DAY",
+]);
+
+export function dealMatchesCategory(
+  deal: Pick<typeof deals.$inferSelect, "dealType" | "salePrice" | "perkSummary">,
+  category: HomeCategory,
+): boolean {
+  if (category === "DISCOUNT") {
+    return deal.salePrice !== null || DISCOUNT_DEAL_TYPES.has(deal.dealType);
+  }
+  if (category === "PERK") {
+    return deal.dealType === "PERK_GOODS" || Boolean(deal.perkSummary?.trim());
+  }
+  return deal.dealType === "SINGALONG" || deal.dealType === "CURTAIN_CALL";
+}
 
 export interface ShowSearchQuery {
   q?: string;
@@ -28,6 +52,7 @@ export interface ShowSearchQuery {
   priceMin?: number;
   priceMax?: number;
   regions?: SubRegion[];
+  category?: HomeCategory;
   dealType?: DealType;
   seatGrade?: SeatGrade;
   unconditionalOnly?: boolean;
@@ -51,6 +76,13 @@ export interface ShowCardItem {
   basePrice: number | null;
   maxDiscountRate: number | null;
   primaryDealType: DealType;
+  categories: HomeCategory[];
+  perkHighlight: string | null;
+  eventHighlight: {
+    dealType: "SINGALONG" | "CURTAIN_CALL";
+    summary: string;
+    date: string | null;
+  } | null;
   isUnconditional: boolean;
   earliestExpiresAt: string | null;
   dDay: number | null;
@@ -100,6 +132,16 @@ function toShowCard(
     .sort();
   const earliestExpiresAt = withExpiry[0] ?? null;
   const userReport = showDeals.find((d) => d.sourceType === "USER_REPORT");
+  const categories = HOME_CATEGORIES.filter((cat) =>
+    showDeals.some((d) => dealMatchesCategory(d, cat)),
+  );
+  const perkDeal =
+    showDeals.find((d) => d.dealType === "PERK_GOODS") ??
+    showDeals.find((d) => Boolean(d.perkSummary?.trim()));
+  const eventDeal = showDeals.find(
+    (d) => d.dealType === "SINGALONG" || d.dealType === "CURTAIN_CALL",
+  );
+  const eventDates = eventDeal ? parseJsonArray<string>(eventDeal.eventDatesJson) : [];
 
   return {
     id: show.id,
@@ -117,6 +159,15 @@ function toShowCard(
       null,
     ),
     primaryDealType: topDeal?.dealType ?? "TIMESALE",
+    categories,
+    perkHighlight: perkDeal ? perkDeal.perkSummary?.trim() || perkDeal.conditionSummary || "현장 특전 증정" : null,
+    eventHighlight: eventDeal
+      ? {
+          dealType: eventDeal.dealType as "SINGALONG" | "CURTAIN_CALL",
+          summary: eventDeal.conditionSummary || (eventDeal.dealType === "SINGALONG" ? "싱어롱 이벤트" : "특별 커튼콜 이벤트"),
+          date: eventDates[0] ?? null,
+        }
+      : null,
     isUnconditional: Boolean(topDeal?.isUnconditional),
     earliestExpiresAt,
     dDay: earliestExpiresAt ? calcKstDDay(earliestExpiresAt, now) : null,
@@ -165,9 +216,10 @@ export function filterShowsWithDeals(
     });
     if (activeDeals.length === 0) continue; // BP-SEARCH-003: search only returns shows with active deals/events
 
-    // Filter deals by price / type / seat / unconditional / conditionTags / source
+    // Filter deals by price / category / type / seat / unconditional / conditionTags / source
     const matchingDeals = activeDeals.filter((d) => {
       if (query.source === "USER_REPORT" && d.sourceType !== "USER_REPORT") return false;
+      if (query.category && !dealMatchesCategory(d, query.category)) return false;
       if (query.dealType && d.dealType !== query.dealType) return false;
       if (query.seatGrade && query.seatGrade !== "ALL" && d.seatGrade !== query.seatGrade && d.seatGrade !== "ALL") {
         return false;
@@ -257,20 +309,13 @@ async function loadShowsWithActiveDeals(db: AppDb, nowIso: string) {
 
 export async function getHomeData(db: AppDb, now = new Date()) {
   const nowIso = now.toISOString();
-  const [curations, dataset, ticketOpenRows, communityRows] = await Promise.all([
+  const [curations, dataset, communityRows] = await Promise.all([
     db
       .select()
       .from(homeCurations)
       .where(eq(homeCurations.isActive, 1))
       .orderBy(asc(homeCurations.sortOrder)),
     loadShowsWithActiveDeals(db, nowIso),
-    db
-      .select({ deal: deals, show: shows })
-      .from(deals)
-      .innerJoin(shows, eq(deals.showId, shows.id))
-      .where(and(activeDealCondition(nowIso), eq(deals.dealType, "TICKET_OPEN")))
-      .orderBy(asc(deals.opensAt))
-      .limit(8),
     db
       .select({ deal: deals, show: shows })
       .from(deals)
@@ -287,18 +332,6 @@ export async function getHomeData(db: AppDb, now = new Date()) {
     heroes: curations.filter((c) => c.slotType === "HERO").slice(0, 3),
     spotlight: curations.find((c) => c.slotType === "SPOTLIGHT") ?? null,
     closingSoon,
-    ticketOpens: ticketOpenRows.map(({ deal, show }) => ({
-      dealId: deal.id,
-      showId: show.id,
-      showTitle: show.title,
-      venueName: show.venueName,
-      subRegion: show.subRegion,
-      channelName: deal.channelName,
-      conditionSummary: deal.conditionSummary,
-      opensAt: deal.opensAt,
-      dDay: deal.opensAt ? calcKstDDay(deal.opensAt, now) : null,
-      externalUrl: deal.externalUrl,
-    })),
     communityDeals: communityRows.map(({ deal, show }) => ({
       dealId: deal.id,
       showId: show.id,
@@ -459,7 +492,7 @@ export async function getShowDetail(db: AppDb, showId: number, now = new Date())
     }));
 
   const events = dealRows
-    .filter((d) => d.dealType === "SINGALONG" || d.dealType === "CURTAIN_CALL" || d.dealType === "PERK_GOODS" || d.dealType === "TICKET_OPEN")
+    .filter((d) => d.dealType === "SINGALONG" || d.dealType === "CURTAIN_CALL" || d.dealType === "PERK_GOODS")
     .map((d) => ({
       id: d.id,
       channelName: d.channelName,
@@ -601,6 +634,11 @@ export function parseShowSearchParams(sp: URLSearchParams | Record<string, strin
       ? datePresetRaw
       : undefined;
 
+  const categoryRaw = get("category");
+  const category = (HOME_CATEGORIES as readonly string[]).includes(categoryRaw ?? "")
+    ? (categoryRaw as HomeCategory)
+    : undefined;
+
   const dealTypeRaw = get("dealType");
   const dealType = (DEAL_TYPES as readonly string[]).includes(dealTypeRaw ?? "")
     ? (dealTypeRaw as DealType)
@@ -628,6 +666,7 @@ export function parseShowSearchParams(sp: URLSearchParams | Record<string, strin
     priceMin: num("priceMin"),
     priceMax: num("priceMax"),
     regions: csv("region", SUB_REGIONS),
+    category,
     dealType,
     seatGrade,
     unconditionalOnly: get("unconditionalOnly") === "true" || get("unconditionalOnly") === "1",

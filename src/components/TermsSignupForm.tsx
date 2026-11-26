@@ -27,7 +27,7 @@ export function TermsSignupForm({ defaultNickname }: { defaultNickname: string }
       });
       const json = (await res.json()) as { data?: { redirectUrl: string }; error?: { message: string } };
       if (!res.ok || !json.data) {
-        setError(json.error?.message ?? "가입 완료 처리에 실패했습니다.");
+        setError(json.error?.message ?? "가입을 마치지 못했어요. 다시 시도해 주세요.");
         return;
       }
       router.push(json.data.redirectUrl);

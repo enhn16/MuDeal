@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useState } from "react";
 import type { SubRegion } from "@/db/schema";
-import { SUB_REGION_SHORT } from "@/lib/labels";
 import { PosterArtwork } from "./ShowCard";
 
 export interface ActorAppearanceItem {
@@ -61,19 +60,14 @@ export function ActorShowsGrid({ shows }: { shows: ActorAppearanceItem[] }) {
 
       {visible.length === 0 ? (
         <p className="py-6 text-center text-sm text-muted">
-          {mode === "current" ? "현재 공연 중인 출연작이 없습니다." : "개막 예정인 출연작이 없습니다."}
+          {mode === "current" ? "현재 공연 중인 출연작이 없어요." : "개막 예정인 출연작이 아직 없어요."}
         </p>
       ) : (
         <div className="grid grid-cols-1 items-stretch gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {visible.map((show) => (
             <Link key={show.id} href={`/shows/${show.id}`} className="group flex h-full flex-col bg-surface">
               <div className="poster-frame relative w-full">
-                <PosterArtwork
-                  title={show.title}
-                  posterUrl={show.posterUrl}
-                  venueName={show.venueName}
-                  subLabel={SUB_REGION_SHORT[show.subRegion]}
-                />
+                <PosterArtwork title={show.title} posterUrl={show.posterUrl} />
               </div>
               <div className="mt-3 flex flex-1 flex-col gap-1">
                 <div className="flex items-center justify-between gap-2 text-xs text-muted">

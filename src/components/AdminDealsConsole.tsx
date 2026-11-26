@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { formatKstDateTime } from "@/lib/kst";
 import { SEAT_GRADE_LABELS } from "@/lib/labels";
 import { formatKrw } from "@/lib/pricing";
 import type { DealType, SeatGrade } from "@/db/schema";
@@ -69,12 +70,23 @@ export function AdminDealsConsole({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ target }),
       });
-      const json = (await res.json()) as { data?: { result: unknown }; error?: { message: string } };
+      const json = (await res.json()) as {
+        data?: { result?: Record<string, unknown> };
+        error?: { message: string };
+      };
       if (!res.ok) {
-        setMessage(json.error?.message ?? `${target} 실행 실패`);
+        setMessage(json.error?.message ?? "동기화를 실행하지 못했어요. 잠시 후 다시 시도해 주세요.");
         return;
       }
-      setMessage(`${target} 실행 완료: ${JSON.stringify(json.data?.result)}`);
+      const r = json.data?.result ?? {};
+      const label = target === "KOPIS" ? "KOPIS 수집" : target === "EXPIRY" ? "마감 일괄 처리" : "채널 수집";
+      const summary =
+        target === "EXPIRY"
+          ? `${Number(r.expiredCount ?? 0)}건 마감 처리했어요.`
+          : r.skipped
+            ? "외부 API 키가 없어 건너뛰었어요."
+            : `${Number(r.fetchedCount ?? 0)}건 확인했어요.`;
+      setMessage(`${label}을 마쳤어요. (${summary})`);
       router.refresh();
     } finally {
       setSyncBusy(null);
@@ -105,7 +117,7 @@ export function AdminDealsConsole({
       setDealList((prev) =>
         prev.map((d) => (d.id === deal.id ? { ...d, adminLocked: next ? 1 : 0 } : d)),
       );
-      setMessage(next ? "admin_locked 활성화됨 (배치 덮어쓰기 보호)" : "자동 동기화 허용으로 전환됨");
+      setMessage(next ? "자동 덮어쓰기 잠금을 켰어요." : "자동 동기화를 허용했어요.");
     }
   }
 
@@ -143,14 +155,14 @@ export function AdminDealsConsole({
     });
     const json = (await res.json()) as { error?: { message: string } };
     if (!res.ok) {
-      setMessage(json.error?.message ?? "딜 등록에 실패했습니다.");
+      setMessage(json.error?.message ?? "딜을 등록하지 못했어요. 입력값을 확인해 주세요.");
       return;
     }
     setAdding(false);
     setSalePrice("");
     setBasePrice("");
     setConditionSummary("");
-    setMessage("새 딜이 등록되었습니다.");
+    setMessage("새 딜을 등록했어요.");
     router.refresh();
   }
 
@@ -168,10 +180,10 @@ export function AdminDealsConsole({
     });
     const json = (await res.json()) as { error?: { message: string } };
     if (!res.ok) {
-      setMessage(json.error?.message ?? "배우 병합에 실패했습니다.");
+      setMessage(json.error?.message ?? "배우를 병합하지 못했어요. 서로 다른 배우를 선택해 주세요.");
       return;
     }
-    setMessage("동명이인 배우 병합이 완료되었습니다.");
+    setMessage("동명이인 배우를 병합했어요.");
     router.refresh();
   }
 
@@ -185,8 +197,8 @@ export function AdminDealsConsole({
           </span>
           <span className="text-sm text-on-surface tabular-nums">
             {lastRun
-              ? `최근 ${lastRun.sourceName} 동기화: ${lastRun.startedAt.slice(0, 16).replace("T", " ")} · ${lastRun.fetchedCount}건`
-              : "최근 배치 이력 없음"}
+              ? `최근 ${lastRun.sourceName} 동기화: ${formatKstDateTime(lastRun.startedAt)} · ${lastRun.fetchedCount}건`
+              : "최근 배치 이력이 없어요"}
           </span>
           <span className="text-xs text-muted tabular-nums">수동 잠금 딜 {lockedCount}건 보호 중</span>
         </div>
@@ -327,7 +339,7 @@ export function AdminDealsConsole({
                       </span>
                       {d.adminLocked === 1 && (
                         <span className="rounded-xs bg-rose-mist px-2 py-0.5 text-[11px] font-semibold text-primary">
-                          admin_locked
+                          자동 잠금
                         </span>
                       )}
                     </div>

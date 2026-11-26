@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { formatKstDateTime } from "@/lib/kst";
 import { DEAL_TYPE_LABELS } from "@/lib/labels";
 import type { DealType } from "@/db/schema";
 
@@ -94,13 +95,13 @@ export function AdminReviewConsole({
       });
       const json = (await res.json()) as { error?: { message: string } };
       if (!res.ok) {
-        setFeedback(json.error?.message ?? "승인 처리에 실패했습니다.");
+        setFeedback(json.error?.message ?? "승인하지 못했어요. 다시 시도해 주세요.");
         return;
       }
       const rest = reports.filter((r) => r.id !== currentReport.id);
       setReports(rest);
       if (rest[0]) selectReport(rest[0]);
-      setFeedback("승인 및 게시 완료되었습니다.");
+      setFeedback("승인하고 게시했어요.");
       router.refresh();
     } finally {
       setBusy(false);
@@ -110,7 +111,7 @@ export function AdminReviewConsole({
   async function handleRejectReport() {
     if (!currentReport) return;
     if (!rejectReason.trim()) {
-      setFeedback("반려 시 사유를 반드시 입력해 주세요.");
+      setFeedback("반려 사유를 입력해 주세요.");
       return;
     }
     setBusy(true);
@@ -123,13 +124,13 @@ export function AdminReviewConsole({
       });
       const json = (await res.json()) as { error?: { message: string } };
       if (!res.ok) {
-        setFeedback(json.error?.message ?? "반려 처리에 실패했습니다.");
+        setFeedback(json.error?.message ?? "반려 처리하지 못했어요. 다시 시도해 주세요.");
         return;
       }
       const rest = reports.filter((r) => r.id !== currentReport.id);
       setReports(rest);
       if (rest[0]) selectReport(rest[0]);
-      setFeedback("반려 처리 완료되었습니다.");
+      setFeedback("반려 처리했어요.");
       router.refresh();
     } finally {
       setBusy(false);
@@ -147,11 +148,11 @@ export function AdminReviewConsole({
       });
       if (!res.ok) {
         const json = (await res.json()) as { error?: { message: string } };
-        setFeedback(json.error?.message ?? "초안 처리에 실패했습니다.");
+        setFeedback(json.error?.message ?? "초안을 처리하지 못했어요. 다시 시도해 주세요.");
         return;
       }
       setDrafts((prev) => prev.filter((d) => d.deal.id !== dealId));
-      setFeedback(action === "approve" ? "초안이 게시되었습니다." : "초안이 폐기되었습니다.");
+      setFeedback(action === "approve" ? "초안을 게시했어요." : "초안을 폐기했어요.");
       router.refresh();
     } finally {
       setBusy(false);
@@ -193,7 +194,7 @@ export function AdminReviewConsole({
         <>
           {!currentReport ? (
             <div className="rounded-lg border border-outline bg-surface p-10 text-center text-sm text-muted">
-              검수 대기 중인 사용자 제보가 없습니다.
+              검수 대기 중인 사용자 제보가 없어요.
             </div>
           ) : (
             <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12">
@@ -204,7 +205,7 @@ export function AdminReviewConsole({
                       {DEAL_TYPE_LABELS[currentReport.dealType]}
                     </span>
                     <span className="text-xs text-muted tabular-nums">
-                      {currentReport.createdAt.slice(0, 16).replace("T", " ")}
+                      {formatKstDateTime(currentReport.createdAt)}
                     </span>
                   </div>
                   <h2 className="text-base font-bold text-on-surface">
@@ -365,7 +366,7 @@ export function AdminReviewConsole({
         <div className="flex flex-col gap-4">
           {drafts.length === 0 ? (
             <div className="rounded-lg border border-outline bg-surface p-10 text-center text-sm text-muted">
-              검수 대기 중인 자동 수집·OCR 초안이 없습니다.
+              검수 대기 중인 자동 수집·OCR 초안이 없어요.
             </div>
           ) : (
             drafts.map((row) => (

@@ -111,11 +111,58 @@ describe("4-axis show search filter", () => {
 
   it("parses CSV regions and conditionTags safely from URLSearchParams", () => {
     const parsed = parseShowSearchParams(
-      new URLSearchParams("region=DAEHAKRO,INVALID&priceMax=50000&conditionTags=MATINEE,REWATCH&unconditionalOnly=1"),
+      new URLSearchParams("region=DAEHAKRO,INVALID&priceMax=50000&conditionTags=MATINEE,REWATCH&unconditionalOnly=1&category=PERK"),
     );
     expect(parsed.regions).toEqual(["DAEHAKRO"]);
     expect(parsed.priceMax).toBe(50000);
     expect(parsed.conditionTags).toEqual(["MATINEE", "REWATCH"]);
     expect(parsed.unconditionalOnly).toBe(true);
+    expect(parsed.category).toBe("PERK");
+  });
+
+  it("classifies shows across DISCOUNT, PERK, and EVENT even when a show has priced deals", () => {
+    const multiDealDataset = [
+      {
+        show: makeShow({ id: 10, title: "뮤지컬 <알라딘>" }),
+        deals: [
+          makeDeal({ id: 101, showId: 10, dealType: "TIMESALE", salePrice: 123500 }),
+          makeDeal({
+            id: 102,
+            showId: 10,
+            dealType: "CURTAIN_CALL",
+            salePrice: null,
+            discountRate: null,
+            conditionSummary: "주말 커튼콜 촬영 가능",
+            perkSummary: "스페셜 포토카드 1종 증정",
+            eventDatesJson: '["2026-12-05"]',
+          }),
+        ],
+        actorNames: ["김준수"],
+      },
+      {
+        show: makeShow({ id: 11, title: "뮤지컬 <어쩌면 해피엔딩>" }),
+        deals: [
+          makeDeal({
+            id: 103,
+            showId: 11,
+            dealType: "PERK_GOODS",
+            salePrice: null,
+            discountRate: null,
+            perkSummary: "미공개 OST 엽서 증정",
+          }),
+        ],
+        actorNames: ["전미도"],
+      },
+    ];
+
+    const all = filterShowsWithDeals(multiDealDataset, {}, now);
+    const aladdin = all.find((s) => s.id === 10)!;
+    expect(aladdin.categories).toEqual(["DISCOUNT", "PERK", "EVENT"]);
+    expect(aladdin.perkHighlight).toContain("포토카드");
+    expect(aladdin.eventHighlight?.dealType).toBe("CURTAIN_CALL");
+
+    expect(filterShowsWithDeals(multiDealDataset, { category: "DISCOUNT" }, now).map((s) => s.id)).toEqual([10]);
+    expect(filterShowsWithDeals(multiDealDataset, { category: "PERK" }, now).map((s) => s.id)).toEqual([10, 11]);
+    expect(filterShowsWithDeals(multiDealDataset, { category: "EVENT" }, now).map((s) => s.id)).toEqual([10]);
   });
 });

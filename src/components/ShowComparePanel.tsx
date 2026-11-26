@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { ConditionTag, DealType, SeatGrade } from "@/db/schema";
+import { formatKstDateTime } from "@/lib/kst";
 import { CONDITION_TAG_LABELS, SEAT_GRADE_LABELS } from "@/lib/labels";
 import { compareDealsForDisplay, formatKrw, summarizeLowestDeals } from "@/lib/pricing";
 import { FlagDealIssueButton, HelpfulButton, OutboundButton } from "./DealActions";
@@ -87,7 +88,7 @@ export function ShowComparePanel({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-xl font-semibold text-on-surface">예매처별 실시간 가격 비교</h2>
             <span className="text-[13px] text-muted tabular-nums">
-              최종 확인 {lastVerifiedAt.slice(5, 16).replace("T", " ")} UTC
+              {formatKstDateTime(lastVerifiedAt)} 확인 (KST)
             </span>
           </div>
 
@@ -150,7 +151,7 @@ export function ShowComparePanel({
                   </span>
                 </>
               ) : (
-                <span className="mt-1 text-[13px] text-muted">현재 조건의 무조건 할인이 없습니다.</span>
+                <span className="mt-1 text-[13px] text-muted">지금 진행 중인 무조건 할인이 없어요.</span>
               )}
             </div>
 
@@ -178,7 +179,7 @@ export function ShowComparePanel({
                   </span>
                 </>
               ) : (
-                <span className="mt-1 text-[13px] text-muted">현재 추첨·조건부 할인이 없습니다.</span>
+                <span className="mt-1 text-[13px] text-muted">지금 진행 중인 추첨·조건부 할인이 없어요.</span>
               )}
             </div>
           </div>
@@ -186,7 +187,7 @@ export function ShowComparePanel({
           {/* Comparison Table (mudeal_3 table parity) */}
           {visible.length === 0 ? (
             <p className="rounded-md bg-surface-variant p-6 text-center text-sm text-muted">
-              선택한 조건에 해당하는 활성 할인 딜이 없습니다.
+              선택한 좌석에 진행 중인 할인이 없어요. 다른 좌석이나 조건을 확인해 보세요.
             </p>
           ) : (
             <div className="w-full overflow-x-auto rounded-lg border border-outline">
@@ -282,6 +283,7 @@ export function ShowComparePanel({
                           <OutboundButton
                             dealId={deal.id}
                             externalUrl={deal.externalUrl}
+                            label={`${deal.channelName} 이동 ↗`}
                             variant={isBest ? "primary" : "secondary"}
                           />
                         </td>
@@ -323,7 +325,7 @@ export function ShowComparePanel({
               )}
             </>
           ) : (
-            <span className="text-sm text-muted">비교 가능한 할인이 없습니다.</span>
+            <span className="text-sm text-muted">지금 비교할 수 있는 할인이 없어요.</span>
           )}
         </div>
 
@@ -369,7 +371,7 @@ export function ShowComparePanel({
             <OutboundButton
               dealId={topDeal.id}
               externalUrl={topDeal.externalUrl}
-              label="최저가 예매처로 이동 ↗"
+              label={`${topDeal.channelName}에서 최저가 보기 ↗`}
               variant="primary"
               className="h-12 w-full text-[15px]"
             />

@@ -67,12 +67,7 @@ export default async function ShowDetailPage({ params }: { params: ShowRoutePara
       <div className="flex flex-col gap-6 sm:flex-row">
         <div className="mx-auto w-40 shrink-0 sm:mx-0">
           <div className="poster-frame">
-            <PosterArtwork
-              title={data.show.title}
-              posterUrl={data.show.posterUrl}
-              venueName={data.show.venueName}
-              subLabel={SUB_REGION_LABELS[data.show.subRegion]}
-            />
+            <PosterArtwork title={data.show.title} posterUrl={data.show.posterUrl} />
           </div>
         </div>
 
@@ -132,7 +127,12 @@ export default async function ShowDetailPage({ params }: { params: ShowRoutePara
       <section className="flex flex-col gap-4 rounded-lg border border-outline bg-surface p-6">
         <h2 className="text-xl font-semibold text-on-surface">현장 이벤트 · 특전 안내</h2>
         {data.events.length === 0 ? (
-          <p className="text-sm text-muted">현재 등록된 싱어롱·커튼콜·특전 이벤트가 없습니다.</p>
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-surface-variant px-4 py-3 text-sm text-muted">
+            <span>등록된 싱어롱·커튼콜·특전 이벤트가 아직 없어요.</span>
+            <Link href="/reports/new" className="text-xs font-semibold text-primary hover:underline">
+              이벤트 제보하기 ↗
+            </Link>
+          </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {data.events.map((ev) => {
@@ -149,15 +149,13 @@ export default async function ShowDetailPage({ params }: { params: ShowRoutePara
                       className={`rounded-xs px-2 py-0.5 text-xs font-semibold ${
                         isPerk
                           ? "border border-champagne-gold bg-surface text-on-surface"
-                          : ev.dealType === "TICKET_OPEN"
-                            ? "bg-curtain-noir text-on-curtain-noir"
-                            : "bg-rose-mist text-primary"
+                          : "bg-rose-mist text-primary"
                       }`}
                     >
                       {DEAL_TYPE_LABELS[ev.dealType]}
                     </span>
                     <span className="text-xs text-muted tabular-nums">
-                      {ev.eventDates[0] ?? (ev.opensAt ? ev.opensAt.slice(5, 16).replace("T", " ") : ev.channelName)}
+                      {ev.eventDates[0] ?? ev.channelName}
                     </span>
                   </div>
                   <h3 className="text-[15px] font-semibold text-on-surface">
@@ -170,7 +168,7 @@ export default async function ShowDetailPage({ params }: { params: ShowRoutePara
                     rel="noopener noreferrer"
                     className="mt-auto pt-1 text-xs font-semibold text-primary hover:underline"
                   >
-                    예매처 공지 원문 보기 ↗
+                    {ev.channelName} 공지 원문 보기 ↗
                   </a>
                 </div>
               );
@@ -183,7 +181,7 @@ export default async function ShowDetailPage({ params }: { params: ShowRoutePara
       <section className="flex flex-col gap-4 rounded-lg border border-outline bg-surface p-6">
         <h2 className="text-xl font-semibold text-on-surface">출연 배우</h2>
         {data.actors.length === 0 ? (
-          <p className="text-sm text-muted">등록된 출연진 정보가 없습니다.</p>
+          <p className="text-sm text-muted">등록된 출연진 정보가 아직 없어요.</p>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {data.actors.map((actor) => {

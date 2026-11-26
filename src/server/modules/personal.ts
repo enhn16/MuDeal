@@ -27,7 +27,7 @@ export interface CalendarAutoEvent {
   id: string;
   eventDate: string; // YYYY-MM-DD KST
   eventTime: string | null;
-  category: "TICKET_OPEN" | "LOTTERY" | "STAGE_EVENT";
+  category: "LOTTERY" | "STAGE_EVENT";
   badgeLabel: string;
   title: string;
   detail: string;
@@ -65,26 +65,6 @@ export function buildAutoCalendarEvents(
 
   for (const { deal, showTitle } of rows) {
     if (!deal.showId) continue;
-
-    if (deal.dealType === "TICKET_OPEN" && deal.opensAt) {
-      const kstDate = formatKstDate(new Date(deal.opensAt));
-      if (inRange(kstDate)) {
-        const kstTime = new Date(Date.parse(deal.opensAt) + 9 * 3600_000).toISOString().slice(11, 16);
-        out.push({
-          id: `auto-open-${deal.id}`,
-          eventDate: kstDate,
-          eventTime: kstTime,
-          category: "TICKET_OPEN",
-          badgeLabel: "티켓오픈",
-          title: `${showTitle} (${deal.channelName})`,
-          detail: deal.conditionSummary ?? "티켓 오픈 예정",
-          showId: deal.showId,
-          dealId: deal.id,
-          readOnly: true,
-        });
-      }
-      continue;
-    }
 
     if (deal.dealType === "LOTTERY" && deal.expiresAt) {
       const kstDate = formatKstDate(new Date(deal.expiresAt));
@@ -463,7 +443,7 @@ export async function getMyCalendar(db: AppDb, userId: number, from: string, to:
         and(
           inArray(deals.showId, Array.from(showIdSet)),
           eq(deals.status, "ACTIVE"),
-          or(eq(deals.dealType, "TICKET_OPEN"), eq(deals.dealType, "LOTTERY"), eq(deals.dealType, "SINGALONG"), eq(deals.dealType, "CURTAIN_CALL"), eq(deals.dealType, "PERK_GOODS")),
+          or(eq(deals.dealType, "LOTTERY"), eq(deals.dealType, "SINGALONG"), eq(deals.dealType, "CURTAIN_CALL"), eq(deals.dealType, "PERK_GOODS")),
         ),
       );
     const activeOnly = dealRows.filter(({ deal }) => !deal.expiresAt || deal.expiresAt > nowIso);

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { formatKstDateTime } from "@/lib/kst";
 
 interface FeedItem {
   id: number;
@@ -140,15 +141,15 @@ export function TargetNewsFeed({
           >
             로그인
           </Link>
-          하면 새 소식 피드·저장하기·캘린더에 담기를 이용할 수 있습니다.
+          하면 새 소식 피드·저장하기·캘린더에 담기를 이용할 수 있어요.
         </p>
       ) : loading ? (
-        <p className="text-xs text-muted">소식을 불러오는 중...</p>
+        <p className="text-xs text-muted">소식을 불러오는 중이에요...</p>
       ) : displayed.length === 0 ? (
         <p className="text-sm text-muted">
           {showPast
-            ? "최근 30일 내 등록된 소식이 없습니다."
-            : "미확인 새 소식이 없습니다. 우측 '최근 소식 다시 보기'로 30일 내 소식을 확인할 수 있습니다."}
+            ? "최근 30일 내 등록된 소식이 없어요."
+            : "아직 확인하지 않은 새 소식이 없어요. 오른쪽 '최근 소식 다시 보기'에서 30일 내 소식을 볼 수 있어요."}
         </p>
       ) : (
         <div className="flex flex-col gap-3">
@@ -171,7 +172,7 @@ export function TargetNewsFeed({
                   <span className="text-[15px] font-semibold text-on-surface">{item.title}</span>
                 </div>
                 <span className="text-xs text-muted tabular-nums">
-                  {item.createdAt.slice(5, 16).replace("T", " ")} 업데이트
+                  {formatKstDateTime(item.createdAt)} 업데이트
                 </span>
               </div>
 

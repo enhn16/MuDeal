@@ -22,7 +22,6 @@ export const DEAL_TYPES = [
   "DISCOUNT_SITE",
   "CARD_EVENT",
   "SPECIAL_DAY",
-  "TICKET_OPEN",
   "SINGALONG",
   "CURTAIN_CALL",
   "PERK_GOODS",

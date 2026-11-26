@@ -27,7 +27,7 @@ export function OutboundButton({
     try {
       const res = await fetch(`/api/v1/deals/${dealId}/clicks`, { method: "POST" });
       if (res.status === 410) {
-        setNotice("이미 마감된 딜입니다.");
+        setNotice("이미 마감된 할인이에요. 다른 예매처를 확인해 보세요.");
         return;
       }
       const body = (await res.json()) as { data?: { externalUrl?: string } };
@@ -74,18 +74,25 @@ export function HelpfulButton({
   const [count, setCount] = useState(initialCount);
   const [voted, setVoted] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   async function toggle() {
     if (busy) return;
     setBusy(true);
+    setFailed(false);
     try {
       const res = await fetch(`/api/v1/deals/${dealId}/helpful`, { method: "POST" });
-      if (!res.ok) return;
+      if (!res.ok) {
+        setFailed(true);
+        return;
+      }
       const body = (await res.json()) as { data?: { voted: boolean; helpfulCount: number } };
       if (body.data) {
         setVoted(body.data.voted);
         setCount(body.data.helpfulCount);
       }
+    } catch {
+      setFailed(true);
     } finally {
       setBusy(false);
     }
@@ -106,8 +113,8 @@ export function HelpfulButton({
       <span className="material-symbols-outlined text-sm" aria-hidden="true">
         thumb_up
       </span>
-      <span>{voted ? "도움 완료 ✓" : "도움이 됐어요"}</span>
-      {showCount && <span>{count}</span>}
+      <span>{failed ? "다시 시도해 주세요" : voted ? "도움 완료 ✓" : "도움이 됐어요"}</span>
+      {showCount && !failed && <span>{count}</span>}
     </button>
   );
 }
@@ -119,15 +126,16 @@ export function ShareLinkButton({
   label?: string;
   iconOnly?: boolean;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [status, setStatus] = useState<"idle" | "copied" | "error">("idle");
 
   async function copy() {
     try {
       await navigator.clipboard.writeText(window.location.href);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
+      setStatus("copied");
+      setTimeout(() => setStatus("idle"), 1800);
     } catch {
-      // Clipboard unavailable
+      setStatus("error");
+      setTimeout(() => setStatus("idle"), 2200);
     }
   }
 
@@ -136,16 +144,16 @@ export function ShareLinkButton({
       <button
         type="button"
         onClick={copy}
-        aria-label={copied ? "링크 복사됨" : "공유하기"}
-        title={copied ? "링크 복사됨 ✓" : "공유하기"}
+        aria-label={status === "copied" ? "링크를 복사했어요" : "링크 공유하기"}
+        title={status === "copied" ? "링크를 복사했어요 ✓" : "링크 공유하기"}
         className={`inline-flex h-11 w-11 items-center justify-center rounded-sm border transition-colors ${
-          copied
+          status === "copied"
             ? "border-secondary bg-rose-mist text-primary"
             : "border-outline bg-surface text-on-surface-variant hover:bg-surface-variant"
         }`}
       >
         <span className="material-symbols-outlined text-xl" aria-hidden="true">
-          {copied ? "check" : "share"}
+          {status === "copied" ? "check" : "share"}
         </span>
       </button>
     );
@@ -158,39 +166,127 @@ export function ShareLinkButton({
       className="inline-flex h-8 items-center gap-1 rounded-xs border border-outline bg-surface px-3 text-xs font-semibold text-on-surface-variant transition-colors hover:bg-surface-sunken"
     >
       <span className="material-symbols-outlined text-base" aria-hidden="true">
-        {copied ? "check" : "share"}
+        {status === "copied" ? "check" : "share"}
       </span>
-      <span>{copied ? "링크 복사됨 ✓" : label}</span>
+      <span>
+        {status === "copied"
+          ? "링크를 복사했어요 ✓"
+          : status === "error"
+            ? "주소를 직접 복사해 주세요"
+            : label}
+      </span>
     </button>
   );
 }
 
-export function FlagDealIssueButton({ dealId }: { dealId: number }) {
-  const [done, setDone] = useState(false);
+const ISSUE_OPTIONS = [
+  { key: "SOLD_OUT", label: "매진됐어요" },
+  { key: "PRICE_MISMATCH", label: "가격이 달라요" },
+  { key: "BROKEN_LINK", label: "링크가 안 열려요" },
+] as const;
 
-  async function reportIssue() {
-    const note = window.prompt("품절/가격 불일치 내용을 간단히 입력해 주세요 (취소 시 미접수):");
-    if (note === null) return;
-    const res = await fetch(`/api/v1/deals/${dealId}/issues`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ issueType: "PRICE_MISMATCH", note: note.trim() || "가격/매진 확인 요청" }),
-    });
-    if (res.status === 401) {
-      window.location.href = `/login?redirectUrl=${encodeURIComponent(window.location.pathname)}`;
-      return;
+export function FlagDealIssueButton({ dealId }: { dealId: number }) {
+  const [open, setOpen] = useState(false);
+  const [issueType, setIssueType] = useState<(typeof ISSUE_OPTIONS)[number]["key"]>("PRICE_MISMATCH");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/v1/deals/${dealId}/issues`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          issueType,
+          note: note.trim() || ISSUE_OPTIONS.find((o) => o.key === issueType)?.label,
+        }),
+      });
+      if (res.status === 401) {
+        window.location.href = `/login?redirectUrl=${encodeURIComponent(window.location.pathname)}`;
+        return;
+      }
+      if (!res.ok) {
+        setError("신고를 보내지 못했어요. 잠시 후 다시 시도해 주세요.");
+        return;
+      }
+      setDone(true);
+      setOpen(false);
+    } catch {
+      setError("연결이 원활하지 않아요. 다시 시도해 주세요.");
+    } finally {
+      setBusy(false);
     }
-    if (res.ok) setDone(true);
+  }
+
+  if (done) {
+    return <span className="text-xs font-semibold text-primary">오류 신고를 접수했어요 ✓</span>;
   }
 
   return (
-    <button
-      type="button"
-      onClick={reportIssue}
-      disabled={done}
-      className="text-xs text-muted underline hover:text-urgent disabled:no-underline"
-    >
-      {done ? "신고 접수됨 ✓" : "가격 · 매진 오류 신고"}
-    </button>
+    <div className="flex flex-col items-end gap-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="text-xs text-muted underline hover:text-urgent"
+      >
+        {open ? "닫기" : "가격 · 매진 오류 신고"}
+      </button>
+
+      {open && (
+        <form
+          onSubmit={submit}
+          className="flex w-full max-w-sm flex-col gap-2.5 rounded-md border border-outline bg-surface-variant p-3.5 text-left"
+        >
+          <span className="text-xs font-semibold text-on-surface">어떤 문제가 있나요?</span>
+          <div className="flex flex-wrap gap-1.5">
+            {ISSUE_OPTIONS.map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => setIssueType(opt.key)}
+                className={`h-7 rounded-xs border px-2.5 text-xs font-semibold transition-colors ${
+                  issueType === opt.key
+                    ? "border-secondary bg-rose-mist text-primary"
+                    : "border-outline bg-surface text-on-surface-variant"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <input
+            type="text"
+            maxLength={120}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="자세한 내용을 적어주시면 더 빨리 확인해요 (선택)"
+            className="h-8 rounded-xs border border-outline bg-surface px-2.5 text-xs text-on-surface focus:border-secondary focus:outline-none"
+          />
+          {error && <p className="text-xs font-medium text-urgent">{error}</p>}
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="h-8 rounded-xs border border-outline bg-surface px-3 text-xs font-semibold text-muted"
+            >
+              닫기
+            </button>
+            <button
+              type="submit"
+              disabled={busy}
+              className="h-8 rounded-xs bg-secondary px-3 text-xs font-semibold text-on-secondary hover:bg-secondary-hover disabled:opacity-60"
+            >
+              {busy ? "접수 중..." : "신고하기"}
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
   );
 }

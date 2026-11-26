@@ -28,8 +28,8 @@ export default async function ReportNewPage() {
           <div className="border-b border-outline pb-4">
             <h1 className="text-2xl font-bold text-on-surface">할인 · 이벤트 제보하기</h1>
             <p className="mt-1 text-xs text-muted">
-              승인되면 홈 &apos;제보해주신 딜&apos; 판에 닉네임과 확인·도움 수가 함께 올라갑니다.
-              원문 예매처 링크(`https://`)를 꼭 입력해 주세요. (일 최대 10건)
+              승인되면 홈 &apos;제보해주신 딜&apos;에 닉네임과 확인·도움 수가 함께 올라가요.
+              https://로 시작하는 원문 예매처 링크를 입력해 주세요. (하루 최대 10건)
             </p>
           </div>
           <ReportForm defaultNickname={session.user.nickname} shows={showList} />

@@ -6,12 +6,12 @@ import type { DealType, SeatGrade } from "@/db/schema";
 
 const DRAFT_KEY = "mudeal:report-draft:v1";
 
-type ReportCategory = "deal" | "event" | "open";
+type ReportCategory = "deal" | "perk" | "event";
 
 const CATEGORY_DEFAULT_TYPE: Record<ReportCategory, DealType> = {
   deal: "TIMESALE",
+  perk: "PERK_GOODS",
   event: "CURTAIN_CALL",
-  open: "TICKET_OPEN",
 };
 
 export function ReportForm({
@@ -81,7 +81,7 @@ export function ReportForm({
       error?: { message: string };
     };
     if (!res.ok || !json.data) {
-      setError(json.error?.message ?? "이미지 업로드에 실패했습니다.");
+      setError(json.error?.message ?? "이미지를 올리지 못했어요. 5MB 이하 JPG·PNG·WebP 파일로 다시 시도해 주세요.");
       return;
     }
     setEvidenceR2Key(json.data.evidenceR2Key);
@@ -97,6 +97,10 @@ export function ReportForm({
       const title = reportedShowTitle.trim() || selectedShow?.title || "";
       if (!title) {
         setError("작품을 선택하거나 작품명을 입력해 주세요.");
+        return;
+      }
+      if (!externalUrl.trim().startsWith("https://")) {
+        setError("https://로 시작하는 원문 예매처 링크를 입력해 주세요.");
         return;
       }
 
@@ -121,7 +125,7 @@ export function ReportForm({
       const json = (await res.json()) as { error?: { message: string } };
       if (!res.ok) {
         saveDraftLocally();
-        setError(json.error?.message ?? "제보 등록에 실패했습니다. 작성 내용은 임시 저장되었습니다.");
+        setError(json.error?.message ?? "제보를 등록하지 못했어요. 작성하던 내용은 임시 저장해 두었어요.");
         return;
       }
       localStorage.removeItem(DRAFT_KEY);
@@ -138,10 +142,9 @@ export function ReportForm({
         <span className="rounded-xs bg-rose-mist px-3 py-1 text-xs font-semibold text-primary">
           제보 접수 완료
         </span>
-        <h2 className="text-xl font-bold text-on-surface">소중한 제보 감사합니다</h2>
+        <h2 className="text-xl font-bold text-on-surface">제보를 접수했어요</h2>
         <p className="text-sm text-muted">
-          관리자 검수가 완료되면 홈 &apos;제보해주신 딜&apos; 판에 닉네임과 확인·도움 수가 함께
-          노출됩니다.
+          검수를 마치면 홈 &apos;제보해주신 딜&apos;에 닉네임과 확인·도움 수가 함께 올라가요.
         </p>
         <div className="mt-2 flex gap-3">
           <button
@@ -171,9 +174,9 @@ export function ReportForm({
         <div className="grid grid-cols-3 gap-3">
           {(
             [
-              ["deal", "할인 딜"],
-              ["event", "현장 이벤트·특전"],
-              ["open", "티켓오픈 소식"],
+              ["deal", "할인"],
+              ["perk", "특전"],
+              ["event", "싱어롱·특별 커튼콜"],
             ] as const
           ).map(([key, label]) => (
             <button
@@ -287,6 +290,11 @@ export function ReportForm({
           placeholder="https://ticket.yes24.com/Perf/..."
           className="h-10 w-full rounded-sm border border-outline bg-surface-variant px-3 text-sm text-on-surface placeholder:text-hint focus:border-secondary focus:bg-surface focus:outline-none"
         />
+        {externalUrl.length > 0 && !externalUrl.trim().startsWith("https://") && (
+          <p className="text-xs font-medium text-urgent">
+            https://로 시작하는 예매처 주소를 입력해 주세요.
+          </p>
+        )}
       </div>
 
       {/* 4. 할인가 · 할인율 (할인 딜일 때) */}

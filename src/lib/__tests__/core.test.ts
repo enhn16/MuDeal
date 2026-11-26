@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calcKstDDay, formatKstDate, isExpired, resolveDatePreset, startOfKstDayUtc } from "@/lib/kst";
+import { calcKstDDay, formatKstDate, formatKstDateTime, isExpired, resolveDatePreset, startOfKstDayUtc } from "@/lib/kst";
 import { calcDiscountRate, compareDealsForDisplay, summarizeLowestDeals } from "@/lib/pricing";
 import { parseSafeExternalUrl, serializeSearchParams } from "@/lib/url";
 import { AppError, jsonError } from "@/lib/errors";
@@ -15,6 +15,7 @@ describe("kst utilities", () => {
   it("computes KST date and daily reset UTC boundary across midnight", () => {
     const kstLateNight = new Date("2026-11-25T15:30:00.000Z"); // 2026-11-26 00:30 KST
     expect(formatKstDate(kstLateNight)).toBe("2026-11-26");
+    expect(formatKstDateTime("2026-11-25T15:30:00.000Z")).toBe("11.26 00:30");
     expect(startOfKstDayUtc(kstLateNight)).toBe("2026-11-25T15:00:00.000Z");
   });
 

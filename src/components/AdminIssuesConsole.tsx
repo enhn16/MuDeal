@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { formatKstDateTime } from "@/lib/kst";
 
 const ISSUE_LABELS: Record<string, string> = {
   SOLD_OUT: "매진 안내",
@@ -51,7 +52,7 @@ export function AdminIssuesConsole({ initialIssues }: { initialIssues: IssueItem
   if (issues.length === 0) {
     return (
       <div className="rounded-lg border border-outline bg-surface p-10 text-center text-sm text-muted">
-        미처리 오류 신고가 없습니다.
+        처리 대기 중인 오류 신고가 없어요.
       </div>
     );
   }
@@ -79,7 +80,7 @@ export function AdminIssuesConsole({ initialIssues }: { initialIssues: IssueItem
               </h2>
             </div>
             <span className="text-xs text-muted tabular-nums">
-              신고 시각 {issue.createdAt.slice(0, 16).replace("T", " ")}
+              {formatKstDateTime(issue.createdAt)} 신고
             </span>
           </div>
 

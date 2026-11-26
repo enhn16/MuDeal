@@ -171,8 +171,14 @@ export interface PresetItem {
 
 export function presetToHref(queryParamsJson: string): string {
   try {
-    const obj = JSON.parse(queryParamsJson) as Record<string, string | number | boolean | string[]>;
-    const qs = serializeSearchParams(obj);
+    const raw = JSON.parse(queryParamsJson) as Record<string, string | number | boolean | string[]>;
+    const normalized: Record<string, string | number | boolean | string[]> = { ...raw };
+    if (normalized.regions && !normalized.region) {
+      normalized.region = normalized.regions;
+      delete normalized.regions;
+    }
+    if (normalized.unconditionalOnly === false) delete normalized.unconditionalOnly;
+    const qs = serializeSearchParams(normalized);
     return qs ? `/search?${qs}` : "/search";
   } catch {
     return "/search";
@@ -205,7 +211,7 @@ export function SearchPresetsBar({
     });
     const json = (await res.json()) as { data?: PresetItem; error?: { message: string } };
     if (!res.ok || !json.data) {
-      setError(json.error?.message ?? "프리셋 저장에 실패했습니다.");
+      setError(json.error?.message ?? "프리셋을 저장하지 못했어요. 다시 시도해 주세요.");
       return;
     }
     setPresets((prev) => [json.data!, ...prev]);

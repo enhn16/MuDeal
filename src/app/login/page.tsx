@@ -48,8 +48,8 @@ export default async function LoginPage({
           </h1>
           <p className="mt-2 text-[13px] text-muted">
             {pending
-              ? "최초 1회 필수 약관에 동의하면 찜 · 뮤배 팔로우 · 제보를 이용할 수 있습니다."
-              : "작품 찜, 뮤배 팔로우, 스토리 피드, 내 캘린더와 할인 제보를 이용하세요."}
+              ? "필수 약관에 동의하면 찜 · 뮤배 팔로우 · 제보를 바로 이용할 수 있어요."
+              : "작품 찜, 뮤배 팔로우, 내 캘린더와 할인 제보를 이용할 수 있어요."}
           </p>
         </div>
 
@@ -65,7 +65,7 @@ export default async function LoginPage({
                 <span className="material-symbols-outlined text-lg text-gold-soft" aria-hidden="true">
                   chat_bubble
                 </span>
-                <span>카카오로 3초 만에 시작하기</span>
+                <span>카카오로 시작하기</span>
               </a>
 
               <a
@@ -83,8 +83,8 @@ export default async function LoginPage({
               <div className="rounded-md border border-outline bg-surface-variant p-3.5 text-xs text-muted">
                 <p className="font-semibold text-on-surface">로컬 개발 모드 (OAuth 키 미설정)</p>
                 <p className="mt-1">
-                  카카오 클릭 시 일반 회원(대학로산책), Google 클릭 시 관리자(MuDeal운영)로 바로
-                  로그인됩니다.
+                  카카오를 누르면 일반 회원(대학로산책), Google을 누르면 관리자(MuDeal운영)로 바로
+                  로그인해요.
                 </p>
                 <div className="mt-2.5 flex flex-wrap gap-2">
                   <a
@@ -98,7 +98,7 @@ export default async function LoginPage({
             )}
 
             <p className="text-center text-xs text-muted">
-              로그인 시 이용약관 및 개인정보처리방침에 동의합니다.
+              로그인하면 이용약관과 개인정보처리방침에 동의하게 돼요.
             </p>
           </>
         )}

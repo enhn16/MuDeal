@@ -46,15 +46,24 @@ VALUES
   (5, 2, '엘티켓', 'TIMESALE', 'R', 70000, 38500, 45, 1, '["MATINEE"]', '평일 낮 마티네 무조건 할인', NULL, NULL, NULL, '예매수수료 1,000원', 'https://www.l-ticket.co.kr/example/laundry', 'seed-laundry-lticket', '2026-11-29T14:59:59.000Z', 'ACTIVE', 'USER_REPORT', '대학로산책', 164, 31),
   (6, 2, '티켓링크', 'DISCOUNT_SITE', 'S', 55000, 35750, 35, 0, '["YOUTH_STUDENT"]', '청년·대학생 증빙 시 할인', NULL, NULL, NULL, '예매수수료 1,000원', 'https://www.ticketlink.co.kr/example/laundry-youth', 'seed-laundry-youth', '2026-12-20T14:59:59.000Z', 'ACTIVE', 'SYNC_APPROVED', NULL, 74, 9),
   (7, 3, 'YES24티켓', 'TIMESALE', 'R', 66000, 39600, 40, 1, '["OFFICE_WORKER"]', 'YES24데이 평일 저녁 특가', NULL, NULL, NULL, '예매수수료 2,000원', 'https://ticket.yes24.com/example/happyending-sale', 'seed-happyending-sale', '2026-11-28T14:59:59.000Z', 'ACTIVE', 'SYNC_APPROVED', NULL, 118, 15),
-  (8, 3, 'YES24티켓', 'TICKET_OPEN', 'ALL', NULL, NULL, NULL, 1, NULL, '3차 티켓오픈 (조기예매 30%)', '2026-11-28T05:00:00.000Z', NULL, NULL, '예매수수료 2,000원', 'https://ticket.yes24.com/example/happyending-open', 'seed-happyending-open', '2026-12-01T06:00:00.000Z', 'ACTIVE', 'SYNC_APPROVED', NULL, 64, 12),
   (9, 4, '티켓링크', 'SPECIAL_DAY', 'S', 110000, 78000, 29, 1, '["CARD_PARTNER"]', '블루스퀘어 제휴 특가 (전석 오픈)', NULL, NULL, NULL, '예매수수료 2,000원', 'https://www.ticketlink.co.kr/example/dracula', 'seed-dracula-link', '2026-11-27T14:59:59.000Z', 'ACTIVE', 'USER_REPORT', '뮤덕10년차', 211, 29),
   (10, 4, 'NOL티켓', 'SINGALONG', 'ALL', NULL, NULL, NULL, 1, NULL, '10주년 기념 싱어롱 데이', NULL, '["2026-12-12"]', '기념 스페셜 티켓 전원 증정', NULL, 'https://tickets.interpark.com/example/dracula-singalong', 'seed-dracula-singalong', '2026-12-12T14:59:59.000Z', 'ACTIVE', 'OCR_APPROVED', NULL, 95, 22),
-  (11, 5, 'NOL티켓', 'DISCOUNT_SITE', 'S', 120000, 84000, 30, 0, '["MATINEE"]', '부산 드림씨어터 평일 마티네 30%', NULL, NULL, NULL, '예매수수료 2,000원', 'https://tickets.interpark.com/example/phantom-busan', 'seed-phantom-busan', '2026-12-05T14:59:59.000Z', 'ACTIVE', 'SYNC_APPROVED', NULL, 82, 11),
-  (12, 5, 'YES24티켓', 'TICKET_OPEN', 'ALL', NULL, NULL, NULL, 1, NULL, '부산 앙코르 회차 티켓오픈', '2026-11-27T02:00:00.000Z', NULL, NULL, '예매수수료 2,000원', 'https://ticket.yes24.com/example/phantom-open', 'seed-phantom-open', '2026-11-30T14:59:59.000Z', 'ACTIVE', 'SYNC_APPROVED', NULL, 47, 8);
+  (11, 5, 'NOL티켓', 'DISCOUNT_SITE', 'S', 120000, 84000, 30, 0, '["MATINEE"]', '부산 드림씨어터 평일 마티네 30%', NULL, NULL, NULL, '예매수수료 2,000원', 'https://tickets.interpark.com/example/phantom-busan', 'seed-phantom-busan', '2026-12-05T14:59:59.000Z', 'ACTIVE', 'SYNC_APPROVED', NULL, 82, 11);
+
+INSERT OR IGNORE INTO deals (
+  show_id, channel_name, deal_type, seat_grade, base_price, sale_price, discount_rate,
+  is_unconditional, condition_tags_json, condition_summary, opens_at, event_dates_json,
+  perk_summary, fee_info, external_url, external_key, expires_at, status, source_type,
+  reporter_nickname, click_count, helpful_count
+)
+VALUES
+  (3, '예스24스테이지', 'PERK_GOODS', 'ALL', NULL, NULL, NULL, 1, NULL, '전 유료 예매자 현장 특전 증정', NULL, '["2026-12-01","2026-12-15"]', '미공개 OST 엽서 세트 + 렌티큘러 포토카드 증정', NULL, 'https://ticket.yes24.com/example/happyending-perk', 'seed-happyending-perk', '2026-12-15T14:59:59.000Z', 'ACTIVE', 'OCR_APPROVED', NULL, 112, 27),
+  (2, '인터파크 유니플렉스', 'PERK_GOODS', 'ALL', NULL, NULL, NULL, 1, NULL, '20주년 기념 회차 굿즈 특전', NULL, '["2026-12-04","2026-12-18"]', '20주년 한정판 스페셜 티켓 + 금속 뱃지 증정', NULL, 'https://tickets.interpark.com/example/laundry-perk', 'seed-laundry-perk', '2026-12-18T14:59:59.000Z', 'ACTIVE', 'SYNC_APPROVED', NULL, 94, 21),
+  (2, '인터파크 유니플렉스', 'CURTAIN_CALL', 'ALL', NULL, NULL, NULL, 1, NULL, '20주년 스페셜 커튼콜 데이 (전 회차 촬영 가능)', NULL, '["2026-12-06","2026-12-13"]', '커튼콜 데이 스페셜 엽서 증정', NULL, 'https://tickets.interpark.com/example/laundry-curtain', 'seed-laundry-curtain', '2026-12-13T14:59:59.000Z', 'ACTIVE', 'OCR_APPROVED', NULL, 108, 25);
 
 INSERT OR IGNORE INTO home_curations (id, slot_type, show_id, eyebrow, title, subtitle, link_url, sort_order, is_active)
 VALUES
   (1, 'HERO', 1, 'WEEKEND TIMEDEAL', '대극장 VIP석 최대 45% 비교', 'NOL · YES24 · 엘티켓 실시간 최저가', '/shows/1', 1, 1),
-  (2, 'HERO', 1, 'LOTTERY & RUSH', '오늘 마감 로터리 티켓 모음', '추첨 특가부터 당일 잔여석까지', '/search?dealType=LOTTERY', 2, 1),
-  (3, 'HERO', 2, 'DAEHAKRO CURATION', '대학로 5만원 이하 마티네·재관람', '커튼콜·스페셜 티켓 증정 회차 포함', '/search?region=DAEHAKRO&priceMax=50000', 3, 1),
+  (2, 'HERO', 1, 'PERK & GOODS', '포토카드 · 한정 굿즈 특전 모음', '유료 예매자 현장 증정 회차 한눈에', '/search?category=PERK', 2, 1),
+  (3, 'HERO', 2, 'SINGALONG & CURTAIN CALL', '싱어롱 · 특별 커튼콜 이벤트', '촬영 가능 회차와 기념 데이 모아보기', '/search?category=EVENT', 3, 1),
   (4, 'SPOTLIGHT', 1, 'TODAY''S LOTTERY & SPECIAL EVENT', 'YES24데이 · NOL 로터리 · 싱어롱', '놓치기 쉬운 로터리 응모 마감과 현장 커튼콜·특전 회차를 한 번에 확인하세요.', '/search?dealType=LOTTERY', 1, 1);

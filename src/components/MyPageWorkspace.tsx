@@ -88,20 +88,28 @@ export function MyPageWorkspace({
   const [evMemo, setEvMemo] = useState("");
   const [evCategory, setEvCategory] = useState<"WATCH" | "TICKETING" | "EVENT" | "CUSTOM">("WATCH");
   const [evError, setEvError] = useState<string | null>(null);
+  const [nickError, setNickError] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
   async function saveNickname() {
     const trimmed = nickDraft.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      setNickError("닉네임을 입력해 주세요.");
+      return;
+    }
+    setNickError(null);
     const res = await fetch("/api/v1/me", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ nickname: trimmed }),
     });
-    if (res.ok) {
-      setNickname(trimmed);
-      setEditingNick(false);
-      router.refresh();
+    if (!res.ok) {
+      setNickError("닉네임을 바꾸지 못했어요. 다시 시도해 주세요.");
+      return;
     }
+    setNickname(trimmed);
+    setEditingNick(false);
+    router.refresh();
   }
 
   async function logout() {
@@ -126,6 +134,8 @@ export function MyPageWorkspace({
     setCalYear(nextY);
     setCalMonth(nextM);
     const mm = String(nextM + 1).padStart(2, "0");
+    const nextPrefix = `${nextY}-${mm}`;
+    setSelectedDate(todayKst.startsWith(nextPrefix) ? todayKst : `${nextPrefix}-01`);
     const lastDay = String(new Date(Date.UTC(nextY, nextM + 1, 0)).getUTCDate()).padStart(2, "0");
     const res = await fetch(`/api/v1/me/calendar?from=${nextY}-${mm}-01&to=${nextY}-${mm}-${lastDay}`);
     if (res.ok) {
@@ -153,7 +163,7 @@ export function MyPageWorkspace({
     });
     const json = (await res.json()) as { data?: CalendarSavedEvent; error?: { message: string } };
     if (!res.ok || !json.data) {
-      setEvError(json.error?.message ?? "일정 저장에 실패했습니다.");
+      setEvError(json.error?.message ?? "일정을 저장하지 못했어요. 다시 시도해 주세요.");
       return;
     }
     setSavedEvents((prev) => [...prev, { ...json.data!, readOnly: false }]);
@@ -164,8 +174,14 @@ export function MyPageWorkspace({
   }
 
   async function removeCalendarEvent(id: number) {
+    setEvError(null);
     const res = await fetch(`/api/v1/me/calendar/${id}`, { method: "DELETE" });
-    if (res.ok) setSavedEvents((prev) => prev.filter((e) => e.id !== id));
+    if (!res.ok) {
+      setEvError("일정을 삭제하지 못했어요. 잠시 후 다시 시도해 주세요.");
+      return;
+    }
+    setSavedEvents((prev) => prev.filter((e) => e.id !== id));
+    setConfirmDeleteId(null);
   }
 
   const cells = useMemo(() => getMonthGrid(calYear, calMonth), [calYear, calMonth]);
@@ -229,7 +245,10 @@ export function MyPageWorkspace({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setEditingNick(false)}
+                  onClick={() => {
+                    setEditingNick(false);
+                    setNickError(null);
+                  }}
                   className="h-9 rounded-sm border border-outline px-2.5 text-xs font-semibold text-muted"
                 >
                   취소
@@ -240,6 +259,7 @@ export function MyPageWorkspace({
                 type="button"
                 onClick={() => {
                   setNickDraft(nickname);
+                  setNickError(null);
                   setEditingNick(true);
                 }}
                 className="inline-flex h-9 items-center gap-1 rounded-sm border border-outline bg-surface px-3 text-xs font-semibold text-on-surface-variant hover:bg-surface-variant"
@@ -258,6 +278,7 @@ export function MyPageWorkspace({
               로그아웃
             </button>
           </div>
+          {nickError && <p className="w-full text-xs font-semibold text-urgent">{nickError}</p>}
         </div>
 
         {/* Story Bar -> clicking goes directly to /shows/[id]#news-feed or /actors/[id]#news-feed */}
@@ -265,9 +286,12 @@ export function MyPageWorkspace({
           <span className="text-[13px] font-semibold text-on-surface">내 뮤배 · 찜 작품 새 소식</span>
 
           {initialStories.length === 0 ? (
-            <p className="text-xs text-muted">
-              작품을 찜하거나 뮤지컬 배우를 팔로우하면 프로필이 이곳에 표시됩니다.
-            </p>
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-surface-variant px-4 py-3 text-xs text-muted">
+              <span>작품을 찜하거나 배우를 팔로우하면 프로필이 이곳에 모여요.</span>
+              <Link href="/" className="font-semibold text-primary hover:underline">
+                공연 둘러보기 ↗
+              </Link>
+            </div>
           ) : (
             <div className="flex items-center gap-5 overflow-x-auto pb-1">
               {initialStories.map((story) => {
@@ -412,7 +436,6 @@ export function MyPageWorkspace({
                       </span>
                       <span className="mt-1 flex h-1.5 gap-1">
                         {dots?.has("LOTTERY") && <span className="h-1.5 w-1.5 rounded-xs bg-champagne-gold" />}
-                        {dots?.has("TICKET_OPEN") && <span className="h-1.5 w-1.5 rounded-xs bg-curtain-noir" />}
                         {(dots?.has("STAGE_EVENT") || dots?.has("SAVED")) && (
                           <span className="h-1.5 w-1.5 rounded-xs bg-secondary" />
                         )}
@@ -502,11 +525,9 @@ export function MyPageWorkspace({
                     <div className="flex items-center justify-between">
                       <span
                         className={`rounded-xs px-2 py-0.5 text-[11px] font-semibold ${
-                          ev.category === "TICKET_OPEN"
-                            ? "bg-curtain-noir text-on-curtain-noir"
-                            : ev.category === "LOTTERY"
-                              ? "border border-champagne-gold bg-surface text-on-surface"
-                              : "bg-rose-mist text-primary"
+                          ev.category === "LOTTERY"
+                            ? "border border-champagne-gold bg-surface text-on-surface"
+                            : "bg-rose-mist text-primary"
                         }`}
                       >
                         {ev.badgeLabel}
@@ -538,13 +559,32 @@ export function MyPageWorkspace({
                         {ev.eventTime && (
                           <span className="text-xs text-muted tabular-nums">{ev.eventTime}</span>
                         )}
-                        <button
-                          type="button"
-                          onClick={() => removeCalendarEvent(ev.id)}
-                          className="text-xs text-hint hover:text-urgent"
-                        >
-                          삭제
-                        </button>
+                        {confirmDeleteId === ev.id ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => removeCalendarEvent(ev.id)}
+                              className="rounded-xs bg-urgent px-2 py-0.5 text-[11px] font-semibold text-white"
+                            >
+                              삭제 확인
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteId(null)}
+                              className="text-[11px] font-semibold text-muted hover:text-on-surface"
+                            >
+                              취소
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(ev.id)}
+                            className="text-xs text-hint hover:text-urgent"
+                          >
+                            삭제
+                          </button>
+                        )}
                       </div>
                     </div>
                     <span className="text-sm font-semibold text-on-surface">{ev.title}</span>
@@ -553,9 +593,18 @@ export function MyPageWorkspace({
                 ))}
 
                 {dayAutoEvents.length === 0 && daySavedEvents.length === 0 && (
-                  <p className="rounded-md border border-outline bg-surface-variant p-6 text-center text-xs text-muted">
-                    선택한 날짜에 등록된 일정이 없습니다.
-                  </p>
+                  <div className="flex flex-col items-center gap-2 rounded-md border border-outline bg-surface-variant p-6 text-center">
+                    <p className="text-xs text-muted">선택한 날짜에 등록된 일정이 없어요.</p>
+                    {!addingEvent && (
+                      <button
+                        type="button"
+                        onClick={() => setAddingEvent(true)}
+                        className="text-xs font-semibold text-primary hover:underline"
+                      >
+                        이 날에 관극 일정 추가하기
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
@@ -566,7 +615,18 @@ export function MyPageWorkspace({
         {tab === "saved" && (
           <div className="flex flex-col gap-3">
             {savedNotis.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted">저장한 소식이 없습니다.</p>
+              <div className="flex flex-col items-center gap-2 py-8 text-center">
+                <p className="text-sm font-medium text-on-surface">저장한 소식이 아직 없어요.</p>
+                <p className="text-xs text-muted">
+                  찜한 작품이나 팔로우한 배우의 새소식에서 저장하기를 누르면 이곳에 모여요.
+                </p>
+                <Link
+                  href="/"
+                  className="mt-1 inline-flex h-9 items-center rounded-sm border border-outline bg-surface px-4 text-xs font-semibold text-primary hover:bg-rose-mist"
+                >
+                  공연 둘러보기
+                </Link>
+              </div>
             ) : (
               savedNotis.map((n) => (
                 <div
@@ -613,7 +673,12 @@ export function MyPageWorkspace({
         </div>
 
         {initialReports.items.length === 0 ? (
-          <p className="text-xs text-muted">아직 제출한 할인·이벤트 제보가 없습니다.</p>
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-surface-variant px-4 py-3 text-xs text-muted">
+            <span>아직 제보한 할인·이벤트가 없어요.</span>
+            <Link href="/reports/new" className="font-semibold text-primary hover:underline">
+              첫 혜택 제보하기 ↗
+            </Link>
+          </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {initialReports.items.map((rep) => (
@@ -641,7 +706,7 @@ export function MyPageWorkspace({
                         : "bg-surface-sunken text-on-surface-variant"
                   }`}
                 >
-                  {rep.status === "APPROVED" ? "승인됨" : rep.status === "REJECTED" ? "반려됨" : "검수중"}
+                  {rep.status === "APPROVED" ? "승인 완료" : rep.status === "REJECTED" ? "반려" : "검수 중"}
                 </span>
               </div>
             ))}

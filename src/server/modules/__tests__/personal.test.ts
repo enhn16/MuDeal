@@ -2,20 +2,20 @@ import { describe, expect, it } from "vitest";
 import { buildAutoCalendarEvents } from "@/server/modules/personal";
 
 describe("personal calendar auto-event extraction", () => {
-  it("extracts TICKET_OPEN, LOTTERY, and CURTAIN_CALL dates within KST range", () => {
+  it("extracts LOTTERY and CURTAIN_CALL dates within KST range", () => {
     const events = buildAutoCalendarEvents(
       [
         {
-          showTitle: "뮤지컬 <어쩌면 해피엔딩>",
+          showTitle: "뮤지컬 <알라딘>",
           deal: {
-            id: 8,
-            showId: 3,
-            channelName: "YES24티켓",
-            dealType: "TICKET_OPEN",
-            opensAt: "2026-11-28T05:00:00.000Z", // 2026-11-28 14:00 KST
-            expiresAt: "2026-12-01T06:00:00.000Z",
+            id: 1,
+            showId: 1,
+            channelName: "NOL티켓",
+            dealType: "LOTTERY",
+            opensAt: null,
+            expiresAt: "2026-11-28T14:59:59.000Z", // 2026-11-28 23:59 KST
             eventDatesJson: null,
-            conditionSummary: "3차 오픈",
+            conditionSummary: "로터리 추첨 응모",
             perkSummary: null,
           },
         },
@@ -41,8 +41,7 @@ describe("personal calendar auto-event extraction", () => {
     expect(events).toHaveLength(2);
     expect(events[0]).toMatchObject({
       eventDate: "2026-11-28",
-      eventTime: "14:00",
-      category: "TICKET_OPEN",
+      category: "LOTTERY",
     });
     expect(events[1]).toMatchObject({
       eventDate: "2026-11-29",

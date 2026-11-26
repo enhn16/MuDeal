@@ -10,6 +10,14 @@ export function formatKstDate(now = new Date()): string {
   return toKstShifted(now).toISOString().slice(0, 10);
 }
 
+/** Format an ISO/UTC timestamp or Date as KST MM.DD HH:mm. */
+export function formatKstDateTime(value: string | Date): string {
+  const date = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return typeof value === "string" ? value.slice(5, 16).replace("T", " ") : "";
+  const iso = toKstShifted(date).toISOString();
+  return `${iso.slice(5, 7)}.${iso.slice(8, 10)} ${iso.slice(11, 16)}`;
+}
+
 /** UTC ISO string for 00:00:00 KST of the given instant (daily limit reset boundary). */
 export function startOfKstDayUtc(now = new Date()): string {
   const kstDate = formatKstDate(now);

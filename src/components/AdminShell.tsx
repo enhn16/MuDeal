@@ -73,7 +73,7 @@ export function AdminShell({
       <div className="flex min-w-0 flex-1 flex-col gap-5">
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-outline bg-surface px-6 py-4">
           <h1 className="text-xl font-bold text-on-surface">{title}</h1>
-          <span className="text-xs text-muted">감사 로그(audit_logs) 자동 기록</span>
+          <span className="text-xs text-muted">변경 이력 자동 기록</span>
         </div>
         {children}
       </div>

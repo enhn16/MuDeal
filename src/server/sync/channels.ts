@@ -233,7 +233,7 @@ export const ticketlinkAdapter: ChannelSyncAdapter = {
   },
 };
 
-/** Tier-1 YES24 ticket-open notice adapter (low-frequency SSR/axList endpoint from SAD §4). */
+/** Tier-1 YES24 discount/event/perk notice adapter (skips plain non-discount ticket opens). */
 export const yes24Adapter: ChannelSyncAdapter = {
   sourceName: "YES24",
   async fetchDrafts() {
@@ -249,12 +249,21 @@ export const yes24Adapter: ChannelSyncAdapter = {
     while ((m = regex.exec(html)) !== null && out.length < 15) {
       const id = m[1];
       const title = m[2].replace(/\s+/g, " ").trim();
-      if (!title.includes("뮤지컬") && !title.includes("티켓오픈")) continue;
+      const dealType: DealType | null = title.includes("싱어롱")
+        ? "SINGALONG"
+        : title.includes("커튼콜")
+          ? "CURTAIN_CALL"
+          : title.includes("특전") || title.includes("포토카드") || title.includes("굿즈")
+            ? "PERK_GOODS"
+            : title.includes("할인") || title.includes("조기예매") || title.includes("타임세일")
+              ? "DISCOUNT_SITE"
+              : null;
+      if (!dealType) continue;
       out.push({
         externalKey: `yes24-notice-${id}`,
         channelName: "YES24티켓",
         showTitle: title,
-        dealType: "TICKET_OPEN",
+        dealType,
         conditionSummary: title,
         externalUrl: `https://ticket.yes24.com/New/Notice/NoticeMain.aspx?id=${id}`,
       });
