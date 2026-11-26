@@ -37,14 +37,25 @@ interface AccessPayload extends Record<string, unknown> {
   nickname: string;
 }
 
-export function getJwtSecret(cfEnv?: Partial<CloudflareEnv>): string {
+export function getJwtSecret(
+  cfEnv?: Partial<CloudflareEnv>,
+  opts: { allowDevFallback?: boolean } = {},
+): string {
   if (cfEnv?.JWT_SECRET && cfEnv.JWT_SECRET.length >= 16) return cfEnv.JWT_SECRET;
-  // shortcut: local dev fallback secret; must configure JWT_SECRET via `wrangler secret put` before production
+  if (opts.allowDevFallback !== true) {
+    throw new AppError("INTERNAL_ERROR", "서버 인증 시크릿(JWT_SECRET)이 설정되지 않았습니다.");
+  }
   return "mudeal-local-dev-jwt-secret-change-in-prod";
 }
 
 export function isLocalhostOrigin(url: URL): boolean {
   return url.hostname === "localhost" || url.hostname === "127.0.0.1";
+}
+
+export function isLocalhostHost(host: string | null | undefined): boolean {
+  if (!host) return false;
+  const hostname = host.trim().toLowerCase().replace(/:\d+$/, "");
+  return hostname === "localhost" || hostname === "127.0.0.1";
 }
 
 /** Prevent open redirects: allow only single-slash internal paths. */
@@ -64,6 +75,17 @@ export function shouldBootstrapAdmin(email: string | null | undefined, adminEmai
   return adminEmailsEnv
     .split(",")
     .map((e) => e.trim().toLowerCase())
+    .filter(Boolean)
+    .includes(target);
+}
+
+/** Auto-assign ADMIN if Kakao user id (oauth_subject) is listed in ADMIN_KAKAO_IDS. */
+export function isAdminKakaoId(subject: string | null | undefined, adminKakaoIdsEnv?: string): boolean {
+  if (!subject || !adminKakaoIdsEnv) return false;
+  const target = subject.trim();
+  return adminKakaoIdsEnv
+    .split(",")
+    .map((id) => id.trim())
     .filter(Boolean)
     .includes(target);
 }
@@ -300,7 +322,7 @@ export async function exchangeOAuthProfile(
     };
     return {
       subject: String(me.id),
-      nickname: me.kakao_account?.profile?.nickname?.trim() || "뮤지컬관객",
+      nickname: me.kakao_account?.profile?.nickname?.trim() || "",
       email: me.kakao_account?.email ?? null,
     };
   }

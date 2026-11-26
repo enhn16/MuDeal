@@ -15,7 +15,7 @@ import {
   type SeatGrade,
   type SubRegion,
 } from "@/db/schema";
-import { calcKstDDay, isExpired, resolveDatePreset } from "@/lib/kst";
+import { calcKstDDay, formatKstDate, isExpired, resolveDatePreset } from "@/lib/kst";
 import { compareDealsForDisplay, summarizeLowestDeals } from "@/lib/pricing";
 
 export type ShowSort = "LOWEST_PRICE" | "HIGHEST_DISCOUNT" | "CLOSING_SOON" | "POPULAR";
@@ -164,7 +164,7 @@ function toShowCard(
     eventHighlight: eventDeal
       ? {
           dealType: eventDeal.dealType as "SINGALONG" | "CURTAIN_CALL",
-          summary: eventDeal.conditionSummary || (eventDeal.dealType === "SINGALONG" ? "싱어롱 이벤트" : "특별 커튼콜 이벤트"),
+          summary: eventDeal.conditionSummary || (eventDeal.dealType === "SINGALONG" ? "싱어롱 이벤트" : "스페셜 커튼콜 이벤트"),
           date: eventDates[0] ?? null,
         }
       : null,
@@ -211,7 +211,10 @@ export function filterShowsWithDeals(
     // Keep only non-expired ACTIVE deals (and deals not expired before requested dateFrom)
     const activeDeals = row.deals.filter((d) => {
       if (d.status !== "ACTIVE" || isExpired(d.expiresAt, now)) return false;
-      if (dateFrom && d.expiresAt && d.expiresAt.slice(0, 10) < dateFrom) return false;
+      if (dateFrom && d.expiresAt) {
+        const expDate = new Date(d.expiresAt);
+        if (!Number.isNaN(expDate.getTime()) && formatKstDate(expDate) < dateFrom) return false;
+      }
       return true;
     });
     if (activeDeals.length === 0) continue; // BP-SEARCH-003: search only returns shows with active deals/events

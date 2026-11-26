@@ -46,7 +46,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* 2. 카테고리별 뮤지컬 (할인 / 특전 / 싱어롱·특별 커튼콜) */}
+      {/* 2. 카테고리별 뮤지컬 (할인 / 특전 / 싱어롱·스페셜 커튼콜) */}
       <section id="categories" className="mx-auto max-w-[1100px] px-5 pt-14 lg:px-0">
         <h1 className="mb-3 text-xl font-semibold text-on-surface">
           혜택별로 뮤지컬 둘러보기

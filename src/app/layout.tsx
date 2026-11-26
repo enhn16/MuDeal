@@ -5,9 +5,10 @@ import { getServerSession } from "@/server/modules/auth-runtime";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "MuDeal — 전국 뮤지컬 할인·로터리·특전 비교",
+  metadataBase: new URL("https://mudeal.kr"),
+  title: "MuDeal — 전국 뮤지컬 할인·특전·싱어롱 비교",
   description:
-    "전국 뮤지컬 티켓 할인, 로터리, 싱어롱, 커튼콜 데이, 굿즈 특전을 날짜·작품/배우·가격대·지역으로 한눈에 비교하세요.",
+    "전국 뮤지컬 티켓 할인, 로터리, 특전, 싱어롱·스페셜 커튼콜을 날짜·작품/배우·가격대·지역으로 한눈에 비교해요.",
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

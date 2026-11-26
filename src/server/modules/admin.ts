@@ -35,7 +35,7 @@ export async function getAdminSidebarCounts(db: AppDb) {
 }
 
 export async function listAdminReviewQueue(db: AppDb) {
-  const [reports, drafts, showOptions] = await Promise.all([
+  const [reports, drafts, showOptions, failedOcrJobs] = await Promise.all([
     db
       .select()
       .from(dealReports)
@@ -60,9 +60,15 @@ export async function listAdminReviewQueue(db: AppDb) {
       .select({ id: shows.id, title: shows.title, kopisId: shows.kopisId })
       .from(shows)
       .orderBy(asc(shows.title)),
+    db
+      .select()
+      .from(ocrImageJobs)
+      .where(eq(ocrImageJobs.ocrStatus, "FAILED"))
+      .orderBy(desc(ocrImageJobs.updatedAt))
+      .limit(15),
   ]);
 
-  return { reports, drafts, showOptions };
+  return { reports, drafts, showOptions, failedOcrJobs };
 }
 
 export async function listAdminDealsWorkspace(db: AppDb) {
@@ -103,6 +109,8 @@ export async function createAdminDeal(
     salePrice?: number | null;
     isUnconditional: boolean;
     conditionSummary?: string | null;
+    perkSummary?: string | null;
+    eventDates?: string[] | null;
     externalUrl: string;
     expiresAt?: string | null;
     adminLocked?: boolean;
@@ -127,6 +135,8 @@ export async function createAdminDeal(
       discountRate,
       isUnconditional: input.isUnconditional ? 1 : 0,
       conditionSummary: input.conditionSummary?.trim() || null,
+      perkSummary: input.perkSummary?.trim() || null,
+      eventDatesJson: input.eventDates?.length ? JSON.stringify(input.eventDates) : null,
       externalUrl: safeUrl,
       expiresAt: input.expiresAt || null,
       status: "ACTIVE",

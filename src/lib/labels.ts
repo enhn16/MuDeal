@@ -4,7 +4,7 @@ import type { HomeCategory } from "@/server/modules/shows";
 export const HOME_CATEGORY_LABELS: Record<HomeCategory, string> = {
   DISCOUNT: "할인",
   PERK: "특전",
-  EVENT: "싱어롱·특별 커튼콜",
+  EVENT: "싱어롱·스페셜 커튼콜",
 };
 
 export const SUB_REGION_LABELS: Record<SubRegion, string> = {
@@ -36,7 +36,7 @@ export const DEAL_TYPE_LABELS: Record<DealType, string> = {
   CARD_EVENT: "카드·제휴",
   SPECIAL_DAY: "스페셜 데이",
   SINGALONG: "싱어롱",
-  CURTAIN_CALL: "커튼콜",
+  CURTAIN_CALL: "스페셜 커튼콜",
   PERK_GOODS: "굿즈·특전",
 };
 

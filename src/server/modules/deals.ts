@@ -31,7 +31,9 @@ export async function recordOutboundClick(
     throw new AppError("DEAL_EXPIRED", "이미 마감된 할인/이벤트입니다.");
   }
 
-  const safeUrl = parseSafeExternalUrl(deal.externalUrl);
+  const safeUrl = parseSafeExternalUrl(deal.externalUrl, {
+    allowHttp: deal.sourceType === "ADMIN",
+  });
   if (!safeUrl) {
     throw new AppError("VALIDATION_ERROR", "안전하지 않은 외부 URL입니다.");
   }

@@ -1,19 +1,19 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { cookies } from "next/headers";
 import { TermsSignupForm } from "@/components/TermsSignupForm";
 import { verifyJwt } from "@/lib/jwt";
 import {
   PENDING_COOKIE,
-  getJwtSecret,
   sanitizeRedirectUrl,
   type PendingSignupPayload,
 } from "@/server/modules/auth";
-import { getAuthEnv } from "@/server/modules/auth-runtime";
+import { getAuthEnv, getServerJwtSecret } from "@/server/modules/auth-runtime";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "소셜 로그인 — MuDeal",
+  title: "카카오 로그인 — MuDeal",
 };
 
 export default async function LoginPage({
@@ -27,17 +27,20 @@ export default async function LoginPage({
   const redirectUrl = sanitizeRedirectUrl(rawRedirect, "/");
 
   const cfEnv = getAuthEnv();
-  const hasRealOAuth = Boolean(cfEnv.KAKAO_CLIENT_ID || cfEnv.GOOGLE_CLIENT_ID);
+  const hasKakaoOAuth = Boolean(cfEnv.KAKAO_CLIENT_ID);
 
   let pending: PendingSignupPayload | null = null;
   if (step === "terms") {
-    const store = await cookies();
-    const raw = store.get(PENDING_COOKIE)?.value;
-    if (raw) pending = await verifyJwt<PendingSignupPayload>(raw, getJwtSecret(cfEnv));
+    try {
+      const store = await cookies();
+      const raw = store.get(PENDING_COOKIE)?.value;
+      if (raw) pending = await verifyJwt<PendingSignupPayload>(raw, await getServerJwtSecret());
+    } catch {
+      pending = null;
+    }
   }
 
   const kakaoHref = `/api/v1/auth/oauth/kakao?redirectUrl=${encodeURIComponent(redirectUrl)}`;
-  const googleHref = `/api/v1/auth/oauth/google?redirectUrl=${encodeURIComponent(redirectUrl)}`;
 
   return (
     <div className="flex flex-1 items-center justify-center bg-surface-variant px-5 py-12">
@@ -67,24 +70,13 @@ export default async function LoginPage({
                 </span>
                 <span>카카오로 시작하기</span>
               </a>
-
-              <a
-                href={googleHref}
-                className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-sm border border-outline-strong bg-surface px-4 text-[15px] font-semibold text-on-surface transition-colors hover:bg-surface-variant"
-              >
-                <span className="material-symbols-outlined text-lg text-primary" aria-hidden="true">
-                  account_circle
-                </span>
-                <span>Google 계정으로 계속하기</span>
-              </a>
             </div>
 
-            {!hasRealOAuth && (
+            {!hasKakaoOAuth && (
               <div className="rounded-md border border-outline bg-surface-variant p-3.5 text-xs text-muted">
-                <p className="font-semibold text-on-surface">로컬 개발 모드 (OAuth 키 미설정)</p>
+                <p className="font-semibold text-on-surface">로컬 개발 모드 (카카오 키 미설정)</p>
                 <p className="mt-1">
-                  카카오를 누르면 일반 회원(대학로산책), Google을 누르면 관리자(MuDeal운영)로 바로
-                  로그인해요.
+                  카카오를 누르면 일반 회원(대학로산책)으로 바로 로그인해요.
                 </p>
                 <div className="mt-2.5 flex flex-wrap gap-2">
                   <a
@@ -98,11 +90,18 @@ export default async function LoginPage({
             )}
 
             <p className="text-center text-xs text-muted">
-              로그인하면 이용약관과 개인정보처리방침에 동의하게 돼요.
+              로그인하면{" "}
+              <Link href="/terms" className="underline hover:text-primary">
+                이용약관
+              </Link>
+              과{" "}
+              <Link href="/privacy" className="underline hover:text-primary">
+                개인정보처리방침
+              </Link>
+              에 동의하게 돼요.
             </p>
           </>
         )}
-
       </section>
     </div>
   );

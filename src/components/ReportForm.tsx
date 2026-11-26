@@ -34,8 +34,6 @@ export function ReportForm({
   const [isUnconditional, setIsUnconditional] = useState(true);
   const [conditionNote, setConditionNote] = useState("");
   const [reporterNickname, setReporterNickname] = useState(defaultNickname);
-  const [evidenceR2Key, setEvidenceR2Key] = useState<string | null>(null);
-  const [evidenceName, setEvidenceName] = useState<string | null>(null);
   const [draftSaved, setDraftSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,25 +67,6 @@ export function ReportForm({
     }
   }
 
-  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setError(null);
-    const fd = new FormData();
-    fd.append("file", file);
-    const res = await fetch("/api/v1/uploads/report-evidence", { method: "POST", body: fd });
-    const json = (await res.json()) as {
-      data?: { evidenceR2Key: string };
-      error?: { message: string };
-    };
-    if (!res.ok || !json.data) {
-      setError(json.error?.message ?? "이미지를 올리지 못했어요. 5MB 이하 JPG·PNG·WebP 파일로 다시 시도해 주세요.");
-      return;
-    }
-    setEvidenceR2Key(json.data.evidenceR2Key);
-    setEvidenceName(file.name);
-  }
-
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -119,7 +98,6 @@ export function ReportForm({
           isUnconditional,
           conditionNote: conditionNote || null,
           reporterNickname: reporterNickname || defaultNickname,
-          evidenceR2Key,
         }),
       });
       const json = (await res.json()) as { error?: { message: string } };
@@ -176,7 +154,7 @@ export function ReportForm({
             [
               ["deal", "할인"],
               ["perk", "특전"],
-              ["event", "싱어롱·특별 커튼콜"],
+              ["event", "싱어롱·스페셜 커튼콜"],
             ] as const
           ).map(([key, label]) => (
             <button
@@ -359,32 +337,19 @@ export function ReportForm({
         />
       </div>
 
-      {/* 6. 표시 닉네임 & 증빙 이미지 (mudeal_4 parity) */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="nickname-input" className="text-[13px] font-semibold text-on-surface">
-            표시 닉네임
-          </label>
-          <input
-            id="nickname-input"
-            type="text"
-            maxLength={20}
-            value={reporterNickname}
-            onChange={(e) => setReporterNickname(e.target.value)}
-            className="h-10 rounded-sm border border-outline bg-surface-variant px-3 text-sm text-on-surface focus:border-secondary focus:bg-surface focus:outline-none"
-          />
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <span className="text-[13px] font-semibold text-on-surface">증빙 이미지 (선택 · 최대 5MB)</span>
-          <label className="inline-flex h-10 cursor-pointer items-center justify-between rounded-sm border border-outline-strong bg-surface px-3 text-[13px] text-on-surface-variant transition-colors hover:bg-surface-variant">
-            <span className="truncate">{evidenceName ?? "이미지 파일 선택..."}</span>
-            <span className="material-symbols-outlined text-lg text-primary" aria-hidden="true">
-              upload_file
-            </span>
-            <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleFileChange} className="sr-only" />
-          </label>
-        </div>
+      {/* 6. 표시 닉네임 */}
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="nickname-input" className="text-[13px] font-semibold text-on-surface">
+          표시 닉네임
+        </label>
+        <input
+          id="nickname-input"
+          type="text"
+          maxLength={20}
+          value={reporterNickname}
+          onChange={(e) => setReporterNickname(e.target.value)}
+          className="h-10 rounded-sm border border-outline bg-surface-variant px-3 text-sm text-on-surface focus:border-secondary focus:bg-surface focus:outline-none"
+        />
       </div>
 
       {error && <p className="text-xs font-semibold text-urgent">{error}</p>}

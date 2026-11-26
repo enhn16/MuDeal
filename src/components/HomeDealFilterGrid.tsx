@@ -22,7 +22,7 @@ const CATEGORY_TABS: Array<{
   },
   {
     key: "EVENT",
-    label: "싱어롱 · 특별 커튼콜",
+    label: "싱어롱 · 스페셜 커튼콜",
     description: "커튼콜 촬영 가능 회차와 싱어롱 데이 일정을 확인해요.",
   },
 ];

@@ -158,12 +158,28 @@ function mapKopisState(state: string, startDate: string, todayKst: string): "UPC
   return "ONGOING";
 }
 
-/** FR-001: daily KOPIS sync (auto-upserts shows, actors, show_actors, notifies actor followers). */
+export interface KopisSyncOptions {
+  maxPages?: number;
+  maxDetailFetches?: number;
+  fetchFn?: typeof fetch;
+}
+
+/**
+ * FR-001: daily KOPIS sync (auto-upserts shows, actors, show_actors, notifies actor followers).
+ * Bounded for Cloudflare Workers Free subrequest limit via venueId caching & incremental detail fetch.
+ */
 export async function syncKopisShows(
   db: AppDb,
   apiKey: string | undefined,
   now = new Date(),
-): Promise<{ runId: number; fetchedCount: number; status: "SUCCESS" | "FAILED"; error?: string }> {
+  opts: KopisSyncOptions = {},
+): Promise<{
+  runId: number;
+  fetchedCount: number;
+  detailFetchCount: number;
+  status: "SUCCESS" | "FAILED";
+  error?: string;
+}> {
   const [run] = await db
     .insert(syncRuns)
     .values({ sourceName: "KOPIS", status: "RUNNING" })
@@ -175,8 +191,12 @@ export async function syncKopisShows(
       .update(syncRuns)
       .set({ status: "FAILED", errorMessage: msg, finishedAt: new Date().toISOString() })
       .where(eq(syncRuns.id, run.id));
-    return { runId: run.id, fetchedCount: 0, status: "FAILED", error: msg };
+    return { runId: run.id, fetchedCount: 0, detailFetchCount: 0, status: "FAILED", error: msg };
   }
+
+  const fetchImpl = opts.fetchFn ?? fetch;
+  const maxPages = Math.max(1, opts.maxPages ?? 3);
+  const maxDetailFetches = Math.max(0, opts.maxDetailFetches ?? 18);
 
   try {
     const todayKst = formatKstDate(now);
@@ -184,43 +204,71 @@ export async function syncKopisShows(
     const edDate = new Date(now.getTime() + 90 * 86_400_000);
     const eddate = formatKstDate(edDate).replaceAll("-", "");
 
-    // shcate=GGGA (뮤지컬)
-    const listUrl = `https://www.kopis.or.kr/openApi/restful/pblprfr?service=${encodeURIComponent(
-      apiKey,
-    )}&stdate=${stdate}&eddate=${eddate}&cpage=1&rows=50&shcate=GGGA`;
-    const res = await fetch(listUrl);
-    if (!res.ok) throw new Error(`KOPIS list HTTP ${res.status}`);
-    const list = parseKopisXmlList(await res.text());
+    // shcate=GGGA (뮤지컬), paginated across up to maxPages * 50 items
+    const list: KopisShowSummary[] = [];
+    const seenKopisIds = new Set<string>();
+    for (let page = 1; page <= maxPages; page++) {
+      const listUrl = `https://www.kopis.or.kr/openApi/restful/pblprfr?service=${encodeURIComponent(
+        apiKey,
+      )}&stdate=${stdate}&eddate=${eddate}&cpage=${page}&rows=50&shcate=GGGA`;
+      const res = await fetchImpl(listUrl);
+      if (!res.ok) throw new Error(`KOPIS list HTTP ${res.status}`);
+      const pageItems = parseKopisXmlList(await res.text());
+      for (const item of pageItems) {
+        if (seenKopisIds.has(item.kopisId)) continue;
+        seenKopisIds.add(item.kopisId);
+        list.push(item);
+      }
+      if (pageItems.length < 50) break;
+    }
 
+    const venueAddressCache = new Map<string, string | null>();
     let synced = 0;
+    let detailFetchCount = 0;
+
     for (const item of list) {
+      const [existing] = await db
+        .select({
+          id: shows.id,
+          basePricesJson: shows.basePricesJson,
+          venueAddress: shows.venueAddress,
+        })
+        .from(shows)
+        .where(eq(shows.kopisId, item.kopisId))
+        .limit(1);
+
+      const needsDetail = !existing || (!existing.basePricesJson && !existing.venueAddress);
       let detail: KopisShowDetail | null = null;
-      let venueAddress: string | null = null;
-      try {
-        const dRes = await fetch(
-          `https://www.kopis.or.kr/openApi/restful/pblprfr/${encodeURIComponent(item.kopisId)}?service=${encodeURIComponent(apiKey)}`,
-        );
-        if (dRes.ok) detail = parseKopisXmlDetail(await dRes.text());
-        if (detail?.venueId) {
-          const vRes = await fetch(
-            `https://www.kopis.or.kr/openApi/restful/prfplc/${encodeURIComponent(detail.venueId)}?service=${encodeURIComponent(apiKey)}`,
+      let venueAddress: string | null = existing?.venueAddress ?? null;
+
+      if (needsDetail && detailFetchCount < maxDetailFetches) {
+        detailFetchCount += 1;
+        try {
+          const dRes = await fetchImpl(
+            `https://www.kopis.or.kr/openApi/restful/pblprfr/${encodeURIComponent(item.kopisId)}?service=${encodeURIComponent(apiKey)}`,
           );
-          if (vRes.ok) venueAddress = xmlTag(await vRes.text(), "adres") || null;
+          if (dRes.ok) detail = parseKopisXmlDetail(await dRes.text());
+          if (detail?.venueId) {
+            if (venueAddressCache.has(detail.venueId)) {
+              venueAddress = venueAddressCache.get(detail.venueId) ?? null;
+            } else {
+              const vRes = await fetchImpl(
+                `https://www.kopis.or.kr/openApi/restful/prfplc/${encodeURIComponent(detail.venueId)}?service=${encodeURIComponent(apiKey)}`,
+              );
+              const addr = vRes.ok ? xmlTag(await vRes.text(), "adres") || null : null;
+              venueAddressCache.set(detail.venueId, addr);
+              venueAddress = addr;
+            }
+          }
+        } catch {
+          // Preserve list item upsert even if detail lookup fails
         }
-      } catch {
-        // Preserve list item upsert even if detail lookup fails
       }
 
       const subRegion = classifySubRegion(item.region, venueAddress, item.venueName);
       const basePrices = parseBasePricesText(detail?.pcseguidance);
       const status = mapKopisState(item.state, item.startDate, todayKst);
       const nowIso = now.toISOString();
-
-      const [existing] = await db
-        .select({ id: shows.id })
-        .from(shows)
-        .where(eq(shows.kopisId, item.kopisId))
-        .limit(1);
 
       let showId: number;
       if (existing) {
@@ -232,7 +280,7 @@ export async function syncKopisShows(
             normalizedTitle: normalizeTitle(item.title),
             posterUrl: item.posterUrl,
             venueName: item.venueName,
-            venueAddress,
+            ...(venueAddress ? { venueAddress } : {}),
             region: item.region,
             subRegion,
             startDate: item.startDate,
@@ -323,13 +371,13 @@ export async function syncKopisShows(
       .set({ status: "SUCCESS", fetchedCount: synced, finishedAt: new Date().toISOString() })
       .where(eq(syncRuns.id, run.id));
 
-    return { runId: run.id, fetchedCount: synced, status: "SUCCESS" };
+    return { runId: run.id, fetchedCount: synced, detailFetchCount, status: "SUCCESS" };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await db
       .update(syncRuns)
       .set({ status: "FAILED", errorMessage: msg, finishedAt: new Date().toISOString() })
       .where(eq(syncRuns.id, run.id));
-    return { runId: run.id, fetchedCount: 0, status: "FAILED", error: msg };
+    return { runId: run.id, fetchedCount: 0, detailFetchCount: 0, status: "FAILED", error: msg };
   }
 }

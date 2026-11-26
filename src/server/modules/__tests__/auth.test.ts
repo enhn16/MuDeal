@@ -3,6 +3,9 @@ import { signJwt, verifyJwt } from "@/lib/jwt";
 import { AppError } from "@/lib/errors";
 import {
   ACCESS_COOKIE,
+  getJwtSecret,
+  isAdminKakaoId,
+  isLocalhostHost,
   requireAdmin,
   requireAuth,
   sanitizeRedirectUrl,
@@ -48,9 +51,25 @@ describe("Auth & RBAC guards", () => {
     expect(sanitizeRedirectUrl("javascript:alert(1)")).toBe("/");
   });
 
-  it("matches ADMIN_OAUTH_EMAILS case-insensitively", () => {
+  it("matches ADMIN_OAUTH_EMAILS and ADMIN_KAKAO_IDS", () => {
     expect(shouldBootstrapAdmin("Admin@MuDeal.kr", "boss@a.com, admin@mudeal.kr")).toBe(true);
     expect(shouldBootstrapAdmin("user@mudeal.kr", "admin@mudeal.kr")).toBe(false);
+    expect(isAdminKakaoId("3847291042", "111, 3847291042")).toBe(true);
+    expect(isAdminKakaoId("999", "111, 3847291042")).toBe(false);
+  });
+
+  it("fails fast by default when JWT_SECRET is missing outside localhost", () => {
+    expect(() => getJwtSecret({})).toThrowError(AppError);
+    expect(() => getJwtSecret({}, { allowDevFallback: false })).toThrowError(AppError);
+    expect(() => getJwtSecret({ JWT_SECRET: "short" }, { allowDevFallback: false })).toThrowError(AppError);
+    expect(getJwtSecret({ JWT_SECRET: SECRET }, { allowDevFallback: false })).toBe(SECRET);
+    expect(getJwtSecret({}, { allowDevFallback: true })).toBeTruthy();
+
+    expect(isLocalhostHost("localhost:5173")).toBe(true);
+    expect(isLocalhostHost("127.0.0.1:8787")).toBe(true);
+    expect(isLocalhostHost("mudeal.kr")).toBe(false);
+    expect(isLocalhostHost("localhost.evil.com")).toBe(false);
+    expect(isLocalhostHost(null)).toBe(false);
   });
 
   it("blocks unauthenticated with 401 and non-admin with 403", async () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   classifySubRegion,
   normalizeTitle,
@@ -6,6 +6,7 @@ import {
   parseCastText,
   parseKopisXmlDetail,
   parseKopisXmlList,
+  syncKopisShows,
 } from "@/server/sync/kopis";
 import { matchShowThreeFactor, type ShowMatchCandidate } from "@/server/sync/channels";
 import { OcrExtractSchema } from "@/server/sync/ocr";
@@ -104,5 +105,64 @@ describe("3-factor regional tour matching & OCR schema", () => {
     });
     expect(parsed.discounts[0].seatGrade).toBe("R");
     expect(() => OcrExtractSchema.parse({ hasRelevantInfo: true, confidence: 1.5 })).toThrow();
+  });
+
+  it("bounds KOPIS detail subrequests, caches duplicate venueId, and skips already-populated shows", async () => {
+    const fetchedUrls: string[] = [];
+    const listXml = `<dbs>
+      <db><mt20id>PF1</mt20id><prfnm>뮤지컬 A</prfnm><prfpdfrom>2026.11.01</prfpdfrom><prfpdto>2026.12.31</prfpdto><fcltynm>유니플렉스 1관</fcltynm><area>서울특별시</area><prfstate>공연중</prfstate></db>
+      <db><mt20id>PF2</mt20id><prfnm>뮤지컬 B</prfnm><prfpdfrom>2026.11.01</prfpdfrom><prfpdto>2026.12.31</prfpdto><fcltynm>유니플렉스 2관</fcltynm><area>서울특별시</area><prfstate>공연중</prfstate></db>
+      <db><mt20id>PF3</mt20id><prfnm>이미수집작</prfnm><prfpdfrom>2026.11.01</prfpdfrom><prfpdto>2026.12.31</prfpdto><fcltynm>샤롯데씨어터</fcltynm><area>서울특별시</area><prfstate>공연중</prfstate></db>
+    </dbs>`;
+
+    const fakeFetch = vi.fn(async (input: string | URL | Request) => {
+      const u = String(input);
+      fetchedUrls.push(u);
+      if (u.includes("/pblprfr?")) return new Response(listXml, { status: 200 });
+      if (u.includes("/pblprfr/PF")) {
+        const id = u.includes("PF1") ? "PF1" : "PF2";
+        return new Response(
+          `<dbs><db><mt20id>${id}</mt20id><pcseguidance>R석 70,000원</pcseguidance><prfcast></prfcast><mt10id>FC_SAME</mt10id></db></dbs>`,
+          { status: 200 },
+        );
+      }
+      return new Response(`<dbs><db><adres>서울특별시 종로구 대학로12길</adres></db></dbs>`, { status: 200 });
+    }) as unknown as typeof fetch;
+
+    let selectIdx = 0;
+    const mockDb = {
+      insert: () => ({
+        values: () => ({
+          returning: async () => [{ id: 100 }],
+          onConflictDoNothing: async () => undefined,
+        }),
+      }),
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => {
+              selectIdx += 1;
+              // PF3 already has basePricesJson & venueAddress -> must skip detail fetch
+              if (selectIdx === 3) return [{ id: 3, basePricesJson: '{"VIP":190000}', venueAddress: "송파구" }];
+              return [];
+            },
+          }),
+        }),
+      }),
+      update: () => ({ set: () => ({ where: async () => undefined }) }),
+    } as unknown as Parameters<typeof syncKopisShows>[0];
+
+    const res = await syncKopisShows(mockDb, "test-key", new Date("2026-11-26T00:00:00Z"), {
+      maxPages: 1,
+      maxDetailFetches: 10,
+      fetchFn: fakeFetch,
+    });
+
+    expect(res.status).toBe("SUCCESS");
+    expect(res.fetchedCount).toBe(3);
+    expect(res.detailFetchCount).toBe(2); // PF1 & PF2 only; PF3 skipped!
+    // 1 list + 2 detail + 1 venue (FC_SAME cached for PF2!) = 4 total fetch calls
+    expect(fetchedUrls.filter((u) => u.includes("/prfplc/"))).toHaveLength(1);
+    expect(fetchedUrls).toHaveLength(4);
   });
 });

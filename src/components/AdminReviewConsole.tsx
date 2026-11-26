@@ -38,19 +38,31 @@ interface DraftRow {
   ocrSourceChannel: string | null;
 }
 
+interface FailedOcrJob {
+  id: number;
+  sourceChannel: string;
+  sourcePageUrl: string;
+  errorMessage: string | null;
+  updatedAt: string;
+}
+
 export function AdminReviewConsole({
   initialReports,
   initialDrafts,
+  initialFailedOcrJobs = [],
   showOptions,
 }: {
   initialReports: PendingReport[];
   initialDrafts: DraftRow[];
+  initialFailedOcrJobs?: FailedOcrJob[];
   showOptions: Array<{ id: number; title: string; kopisId: string | null }>;
 }) {
   const router = useRouter();
   const [tab, setTab] = useState<"user" | "ocr">("user");
   const [reports, setReports] = useState(initialReports);
   const [drafts, setDrafts] = useState(initialDrafts);
+  const [draftShowIds, setDraftShowIds] = useState<Record<number, string>>({});
+  const [failedJobs, setFailedJobs] = useState(initialFailedOcrJobs);
   const [selectedReportId, setSelectedReportId] = useState<number | null>(initialReports[0]?.id ?? null);
   const currentReport = reports.find((r) => r.id === selectedReportId) ?? reports[0] ?? null;
 
@@ -137,14 +149,19 @@ export function AdminReviewConsole({
     }
   }
 
-  async function handleDraftAction(dealId: number, action: "approve" | "discard") {
+  async function handleDraftAction(dealId: number, action: "approve" | "discard", existingShowId: number | null) {
+    const mappedShowId = draftShowIds[dealId] ? Number(draftShowIds[dealId]) : existingShowId;
+    if (action === "approve" && !mappedShowId) {
+      setFeedback("매핑할 작품을 먼저 선택해 주세요.");
+      return;
+    }
     setBusy(true);
     setFeedback(null);
     try {
       const res = await fetch(`/api/v1/admin/drafts/${dealId}/${action}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify(action === "approve" && mappedShowId ? { showId: mappedShowId } : {}),
       });
       if (!res.ok) {
         const json = (await res.json()) as { error?: { message: string } };
@@ -153,6 +170,23 @@ export function AdminReviewConsole({
       }
       setDrafts((prev) => prev.filter((d) => d.deal.id !== dealId));
       setFeedback(action === "approve" ? "초안을 게시했어요." : "초안을 폐기했어요.");
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function retryOcrJob(jobId: number) {
+    setBusy(true);
+    setFeedback(null);
+    try {
+      const res = await fetch(`/api/v1/admin/ocr-jobs/${jobId}/retry`, { method: "POST" });
+      if (!res.ok) {
+        setFeedback("OCR 작업 재시도를 요청하지 못했어요.");
+        return;
+      }
+      setFailedJobs((prev) => prev.filter((j) => j.id !== jobId));
+      setFeedback(`OCR 작업 #${jobId}을 대기열로 되돌렸어요.`);
       router.refresh();
     } finally {
       setBusy(false);
@@ -229,8 +263,23 @@ export function AdminReviewConsole({
                     </a>
                   </div>
                   {currentReport.evidenceR2Key && (
-                    <div className="rounded-sm bg-surface-sunken px-3 py-2 text-xs text-on-surface-variant">
-                      증빙 이미지 첨부됨 ({currentReport.evidenceR2Key})
+                    <div className="flex flex-col gap-2 rounded-sm border border-outline bg-surface-variant p-3">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-semibold text-on-surface">첨부 증빙 이미지</span>
+                        <a
+                          href={`/api/v1/admin/evidence?key=${encodeURIComponent(currentReport.evidenceR2Key)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-semibold text-primary hover:underline"
+                        >
+                          원본 보기 ↗
+                        </a>
+                      </div>
+                      <img
+                        src={`/api/v1/admin/evidence?key=${encodeURIComponent(currentReport.evidenceR2Key)}`}
+                        alt="제보 증빙 이미지"
+                        className="max-h-56 w-full rounded-xs border border-outline bg-surface object-contain"
+                      />
                     </div>
                   )}
                 </div>
@@ -399,6 +448,29 @@ export function AdminReviewConsole({
                   {row.showTitle ?? "(미매핑 작품)"} · {row.deal.conditionSummary ?? DEAL_TYPE_LABELS[row.deal.dealType]}
                 </h3>
 
+                {row.deal.showId === null && (
+                  <div className="flex flex-col gap-1">
+                    <label htmlFor={`draft-show-${row.deal.id}`} className="text-xs font-semibold text-on-surface">
+                      KOPIS 작품 매핑 (승인 전 필수)
+                    </label>
+                    <select
+                      id={`draft-show-${row.deal.id}`}
+                      value={draftShowIds[row.deal.id] ?? ""}
+                      onChange={(e) =>
+                        setDraftShowIds((prev) => ({ ...prev, [row.deal.id]: e.target.value }))
+                      }
+                      className="h-9 rounded-sm border border-outline bg-surface-variant px-3 text-xs text-on-surface"
+                    >
+                      <option value="">작품을 선택해 주세요</option>
+                      {showOptions.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.title} {s.kopisId ? `(${s.kopisId})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 {row.ocrExtractedJson && (
                   <pre className="overflow-x-auto rounded-sm bg-surface-sunken p-3 text-xs text-on-surface-variant tabular-nums">
                     {row.ocrExtractedJson}
@@ -409,7 +481,7 @@ export function AdminReviewConsole({
                   <button
                     type="button"
                     disabled={busy}
-                    onClick={() => handleDraftAction(row.deal.id, "discard")}
+                    onClick={() => handleDraftAction(row.deal.id, "discard", row.deal.showId)}
                     className="h-9 rounded-sm border border-outline bg-surface px-4 text-xs font-semibold text-on-surface-variant hover:bg-surface-variant"
                   >
                     초안 폐기
@@ -417,7 +489,7 @@ export function AdminReviewConsole({
                   <button
                     type="button"
                     disabled={busy}
-                    onClick={() => handleDraftAction(row.deal.id, "approve")}
+                    onClick={() => handleDraftAction(row.deal.id, "approve", row.deal.showId)}
                     className="h-9 rounded-sm bg-secondary px-5 text-xs font-semibold text-on-secondary hover:bg-secondary-hover"
                   >
                     검수 완료 및 게시
@@ -425,6 +497,39 @@ export function AdminReviewConsole({
                 </div>
               </div>
             ))
+          )}
+
+          {failedJobs.length > 0 && (
+            <div className="flex flex-col gap-3 rounded-lg border border-outline bg-surface p-5">
+              <h3 className="text-sm font-bold text-on-surface">
+                실패한 OCR 작업 ({failedJobs.length})
+              </h3>
+              <div className="divide-y divide-outline rounded-md border border-outline">
+                {failedJobs.map((job) => (
+                  <div
+                    key={job.id}
+                    className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-xs"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-semibold text-on-surface">
+                        #{job.id} · {job.sourceChannel} ({formatKstDateTime(job.updatedAt)})
+                      </p>
+                      <p className="mt-0.5 truncate text-muted">
+                        {job.errorMessage ?? job.sourcePageUrl}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => retryOcrJob(job.id)}
+                      className="h-8 shrink-0 rounded-xs border border-outline bg-surface px-3 font-semibold text-primary hover:bg-rose-mist"
+                    >
+                      재시도
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       )}

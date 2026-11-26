@@ -104,6 +104,23 @@ describe("4-axis show search filter", () => {
     expect(res.map((s) => s.id)).toEqual([1]);
   });
 
+  it("compares expiresAt against KST dateFrom (keeps deals expiring 00:00~08:59 KST on dateFrom)", () => {
+    const boundaryDataset = [
+      {
+        show: makeShow({ id: 21, title: "토요일 오전 KST 마감 딜", subRegion: "DAEHAKRO" }),
+        deals: [makeDeal({ id: 21, showId: 21, expiresAt: "2026-11-27T23:00:00.000Z" })], // 2026-11-28 08:00 KST
+        actorNames: [],
+      },
+      {
+        show: makeShow({ id: 22, title: "금요일 자정 직전 KST 마감 딜", subRegion: "DAEHAKRO" }),
+        deals: [makeDeal({ id: 22, showId: 22, expiresAt: "2026-11-27T14:59:59.000Z" })], // 2026-11-27 23:59:59 KST
+        actorNames: [],
+      },
+    ];
+    const res = filterShowsWithDeals(boundaryDataset, { datePreset: "THIS_WEEKEND" }, now);
+    expect(res.map((s) => s.id)).toEqual([21]);
+  });
+
   it("matches by actor name and excludes expired deals", () => {
     const res = filterShowsWithDeals(dataset, { q: "김준수" }, now);
     expect(res.map((s) => s.id)).toEqual([2]);
@@ -111,13 +128,23 @@ describe("4-axis show search filter", () => {
 
   it("parses CSV regions and conditionTags safely from URLSearchParams", () => {
     const parsed = parseShowSearchParams(
-      new URLSearchParams("region=DAEHAKRO,INVALID&priceMax=50000&conditionTags=MATINEE,REWATCH&unconditionalOnly=1&category=PERK"),
+      new URLSearchParams("region=DAEHAKRO,INVALID&priceMin=20000&priceMax=50000&conditionTags=MATINEE,REWATCH&unconditionalOnly=1&category=PERK"),
     );
     expect(parsed.regions).toEqual(["DAEHAKRO"]);
+    expect(parsed.priceMin).toBe(20000);
     expect(parsed.priceMax).toBe(50000);
     expect(parsed.conditionTags).toEqual(["MATINEE", "REWATCH"]);
     expect(parsed.unconditionalOnly).toBe(true);
     expect(parsed.category).toBe("PERK");
+  });
+
+  it("filters by custom priceMin and priceMax range", () => {
+    expect(filterShowsWithDeals(dataset, { priceMin: 40000, priceMax: 100000 }, now).map((s) => s.id)).toEqual([2]);
+    expect(filterShowsWithDeals(dataset, { priceMin: 30000, priceMax: 50000 }, now).map((s) => s.id)).toEqual([1]);
+    expect(filterShowsWithDeals(dataset, { priceMin: 0, priceMax: 100000 }, now).map((s) => s.id)).toEqual([1, 2]);
+    const parsedEmpty = parseShowSearchParams(new URLSearchParams("priceMin=&priceMax=50000"));
+    expect(parsedEmpty.priceMin).toBeUndefined();
+    expect(parsedEmpty.priceMax).toBe(50000);
   });
 
   it("classifies shows across DISCOUNT, PERK, and EVENT even when a show has priced deals", () => {

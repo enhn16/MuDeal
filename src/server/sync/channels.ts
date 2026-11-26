@@ -209,13 +209,24 @@ export const ticketlinkAdapter: ChannelSyncAdapter = {
   sourceName: "TICKETLINK",
   async fetchDrafts() {
     const res = await fetch(
-      "https://mapi.ticketlink.co.kr/mapi/ranking/genre/daily?categoryId=10&categoryId2=16",
+      "https://mapi.ticketlink.co.kr/mapi/ranking/genre/daily?categoryId=10&categoryId2=16&menu=RANKING",
       { headers: { "User-Agent": "MuDealBot/1.0 (+https://mudeal.kr)" } },
     );
     if (!res.ok) throw new Error(`Ticketlink mapi HTTP ${res.status}`);
     const json = (await res.json()) as {
-      data?: { rankingList?: Array<{ productId?: number; productName?: string; hallName?: string }> };
+      data?: {
+        rankingList?: Array<{
+          productId?: number;
+          productName?: string;
+          hallName?: string;
+          locationName?: string;
+          startDate?: number;
+          endDate?: number;
+        }>;
+      };
     };
+    const toDate = (ms?: number) =>
+      typeof ms === "number" && Number.isFinite(ms) ? new Date(ms + 9 * 3_600_000).toISOString().slice(0, 10) : undefined;
     const list = json.data?.rankingList ?? [];
     return list.slice(0, 20).flatMap((row) => {
       if (!row.productId || !row.productName) return [];
@@ -225,6 +236,9 @@ export const ticketlinkAdapter: ChannelSyncAdapter = {
           channelName: "티켓링크",
           showTitle: row.productName,
           venueName: row.hallName,
+          regionHint: row.locationName,
+          startDate: toDate(row.startDate),
+          endDate: toDate(row.endDate),
           dealType: "DISCOUNT_SITE" as const,
           externalUrl: `https://www.ticketlink.co.kr/product/${row.productId}`,
         },
@@ -237,36 +251,42 @@ export const ticketlinkAdapter: ChannelSyncAdapter = {
 export const yes24Adapter: ChannelSyncAdapter = {
   sourceName: "YES24",
   async fetchDrafts() {
-    const res = await fetch(
-      "https://ticket.yes24.com/New/Notice/Ajax/axList.aspx?page=1&genre=15457",
-      { headers: { "User-Agent": "MuDealBot/1.0 (+https://mudeal.kr)" } },
-    );
-    if (!res.ok) throw new Error(`YES24 notice HTTP ${res.status}`);
-    const html = await res.text();
     const out: RawChannelDraft[] = [];
-    const regex = /href="[^"]*\/New\/Notice\/NoticeMain\.aspx\?id=(\d+)[^"]*"[^>]*>([^<]+)</gi;
-    let m: RegExpExecArray | null;
-    while ((m = regex.exec(html)) !== null && out.length < 15) {
-      const id = m[1];
-      const title = m[2].replace(/\s+/g, " ").trim();
-      const dealType: DealType | null = title.includes("싱어롱")
-        ? "SINGALONG"
-        : title.includes("커튼콜")
-          ? "CURTAIN_CALL"
-          : title.includes("특전") || title.includes("포토카드") || title.includes("굿즈")
-            ? "PERK_GOODS"
-            : title.includes("할인") || title.includes("조기예매") || title.includes("타임세일")
-              ? "DISCOUNT_SITE"
-              : null;
-      if (!dealType) continue;
-      out.push({
-        externalKey: `yes24-notice-${id}`,
-        channelName: "YES24티켓",
-        showTitle: title,
-        dealType,
-        conditionSummary: title,
-        externalUrl: `https://ticket.yes24.com/New/Notice/NoticeMain.aspx?id=${id}`,
-      });
+    const seen = new Set<string>();
+    const regex = /href="(?:[^"]*NoticeMain\.aspx\?id=|#id=)(\d+)[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
+
+    for (let page = 1; page <= 2 && out.length < 15; page++) {
+      const res = await fetch(
+        `https://ticket.yes24.com/New/Notice/Ajax/axList.aspx?page=${page}&genre=15457`,
+        { headers: { "User-Agent": "MuDealBot/1.0 (+https://mudeal.kr)" } },
+      );
+      if (!res.ok) throw new Error(`YES24 notice HTTP ${res.status}`);
+      const html = await res.text();
+      let m: RegExpExecArray | null;
+      while ((m = regex.exec(html)) !== null && out.length < 15) {
+        const id = m[1];
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const title = m[2].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+        const dealType: DealType | null = title.includes("싱어롱")
+          ? "SINGALONG"
+          : title.includes("커튼콜")
+            ? "CURTAIN_CALL"
+            : title.includes("특전") || title.includes("포토카드") || title.includes("굿즈")
+              ? "PERK_GOODS"
+              : title.includes("할인") || title.includes("조기예매") || title.includes("타임세일")
+                ? "DISCOUNT_SITE"
+                : null;
+        if (!dealType) continue;
+        out.push({
+          externalKey: `yes24-notice-${id}`,
+          channelName: "YES24티켓",
+          showTitle: title,
+          dealType,
+          conditionSummary: title,
+          externalUrl: `https://ticket.yes24.com/New/Notice/NoticeMain.aspx?id=${id}`,
+        });
+      }
     }
     return out;
   },

@@ -9,6 +9,7 @@ import {
   buildSetCookie,
   exchangeOAuthProfile,
   getJwtSecret,
+  isAdminKakaoId,
   isLocalhostOrigin,
   issueSessionCookies,
   normalizeProvider,
@@ -31,7 +32,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
     }
 
     const cfEnv = getAuthEnv();
-    const secret = getJwtSecret(cfEnv);
+    const secret = getJwtSecret(cfEnv, { allowDevFallback: isLocalhostOrigin(url) });
     const isSecure = url.protocol === "https:";
     const bag = parseCookieHeader(req.headers.get("cookie"));
     const statePayload = bag[STATE_COOKIE]
@@ -79,13 +80,25 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
       if (existing.status !== "ACTIVE") {
         throw new AppError("FORBIDDEN", "이용이 제한되거나 탈퇴한 계정입니다.");
       }
+      let role = existing.role;
+      if (
+        role !== "ADMIN" &&
+        provider === "KAKAO" &&
+        isAdminKakaoId(profile.subject, cfEnv.ADMIN_KAKAO_IDS)
+      ) {
+        role = "ADMIN";
+        await db
+          .update(users)
+          .set({ role: "ADMIN", updatedAt: new Date().toISOString() })
+          .where(eq(users.id, existing.id));
+      }
       await issueSessionCookies(
         db,
         {
           id: existing.id,
           nickname: existing.nickname,
           email: existing.email,
-          role: existing.role,
+          role,
           oauthProvider: existing.oauthProvider,
         },
         headers,

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { AppDb } from "@/db/client";
 import {
   actors,
@@ -10,6 +10,7 @@ import {
   userCalendarEvents,
   userNotifications,
   userSearchPresets,
+  userSessions,
   userShowBookmarks,
   users,
   type SubRegion,
@@ -573,4 +574,64 @@ export async function getMyReportsSummary(db: AppDb, userId: number) {
   }
 
   return { totalClicks, totalHelpful, items: reports };
+}
+
+/** Account withdrawal: revoke sessions, delete personal data, anonymize reports, mark WITHDRAWN. */
+export async function withdrawUserAccount(db: AppDb, userId: number, now = new Date()) {
+  const nowIso = now.toISOString();
+
+  await db
+    .update(userSessions)
+    .set({ revokedAt: nowIso })
+    .where(and(eq(userSessions.userId, userId), isNull(userSessions.revokedAt)));
+
+  const followed = await db
+    .select({ actorId: userActorFollows.actorId })
+    .from(userActorFollows)
+    .where(eq(userActorFollows.userId, userId));
+
+  if (followed.length > 0) {
+    await db
+      .update(actors)
+      .set({ followerCount: sql`max(0, ${actors.followerCount} - 1)` })
+      .where(inArray(actors.id, followed.map((f) => f.actorId)));
+  }
+
+  await Promise.all([
+    db.delete(userActorFollows).where(eq(userActorFollows.userId, userId)),
+    db.delete(userShowBookmarks).where(eq(userShowBookmarks.userId, userId)),
+    db.delete(userNotifications).where(eq(userNotifications.userId, userId)),
+    db.delete(userCalendarEvents).where(eq(userCalendarEvents.userId, userId)),
+    db.delete(userSearchPresets).where(eq(userSearchPresets.userId, userId)),
+  ]);
+
+  const userReports = await db
+    .select({ id: dealReports.id })
+    .from(dealReports)
+    .where(eq(dealReports.reporterId, userId));
+
+  if (userReports.length > 0) {
+    const reportIds = userReports.map((r) => r.id);
+    await Promise.all([
+      db
+        .update(dealReports)
+        .set({ reporterNickname: "익명의 관객" })
+        .where(eq(dealReports.reporterId, userId)),
+      db
+        .update(deals)
+        .set({ reporterNickname: "익명의 관객" })
+        .where(inArray(deals.sourceReportId, reportIds)),
+    ]);
+  }
+
+  await db
+    .update(users)
+    .set({
+      status: "WITHDRAWN",
+      nickname: "탈퇴한 회원",
+      email: null,
+      oauthSubject: `withdrawn:${userId}:${now.getTime()}`,
+      updatedAt: nowIso,
+    })
+    .where(eq(users.id, userId));
 }

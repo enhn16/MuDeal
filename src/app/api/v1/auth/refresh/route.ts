@@ -13,7 +13,7 @@ export async function POST(req: Request) {
     const bag = parseCookieHeader(req.headers.get("cookie"));
     const headers = new Headers();
     const user = await rotateRefreshSession(getRuntimeDb(), bag[REFRESH_COOKIE], headers, {
-      secret: getRuntimeJwtSecret(),
+      secret: getRuntimeJwtSecret(req),
       isSecure,
     });
     return Response.json({ data: { user } }, { headers });

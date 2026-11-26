@@ -36,16 +36,6 @@ export function SiteHeader({
 
         <div className="flex shrink-0 items-center gap-2">
           <Link
-            href="/search"
-            className="inline-flex h-10 items-center gap-1 rounded-sm border border-outline bg-surface px-3 text-[13px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-variant hover:text-primary"
-          >
-            <span className="material-symbols-outlined text-lg" aria-hidden="true">
-              tune
-            </span>
-            <span className="hidden sm:inline">맞춤 검색</span>
-          </Link>
-
-          <Link
             href="/reports/new"
             className="inline-flex h-10 items-center gap-1 rounded-sm border border-outline bg-surface px-3 text-[13px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-variant hover:text-primary"
           >

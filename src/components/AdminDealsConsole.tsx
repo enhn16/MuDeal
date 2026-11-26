@@ -3,9 +3,9 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatKstDateTime } from "@/lib/kst";
-import { SEAT_GRADE_LABELS } from "@/lib/labels";
+import { DEAL_TYPE_LABELS, SEAT_GRADE_LABELS } from "@/lib/labels";
 import { formatKrw } from "@/lib/pricing";
-import type { DealType, SeatGrade } from "@/db/schema";
+import { DEAL_TYPES, type DealType, type SeatGrade } from "@/db/schema";
 
 interface AdminDealRow {
   id: number;
@@ -50,10 +50,14 @@ export function AdminDealsConsole({
   const [adding, setAdding] = useState(false);
   const [showId, setShowId] = useState(String(showOptions[0]?.id ?? ""));
   const [channelName, setChannelName] = useState("NOL티켓");
+  const [dealType, setDealType] = useState<DealType>("TIMESALE");
   const [salePrice, setSalePrice] = useState("");
   const [basePrice, setBasePrice] = useState("");
   const [externalUrl, setExternalUrl] = useState("https://");
   const [conditionSummary, setConditionSummary] = useState("");
+  const [perkSummary, setPerkSummary] = useState("");
+  const [eventDate, setEventDate] = useState("");
+  const [expiresDate, setExpiresDate] = useState("");
   const [sourceActorId, setSourceActorId] = useState("");
   const [targetActorId, setTargetActorId] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -71,22 +75,32 @@ export function AdminDealsConsole({
         body: JSON.stringify({ target }),
       });
       const json = (await res.json()) as {
-        data?: { result?: Record<string, unknown> };
+        data?: { result?: unknown };
         error?: { message: string };
       };
       if (!res.ok) {
         setMessage(json.error?.message ?? "동기화를 실행하지 못했어요. 잠시 후 다시 시도해 주세요.");
         return;
       }
-      const r = json.data?.result ?? {};
-      const label = target === "KOPIS" ? "KOPIS 수집" : target === "EXPIRY" ? "마감 일괄 처리" : "채널 수집";
-      const summary =
-        target === "EXPIRY"
-          ? `${Number(r.expiredCount ?? 0)}건 마감 처리했어요.`
-          : r.skipped
-            ? "외부 API 키가 없어 건너뛰었어요."
+      const raw = json.data?.result;
+      const label = target === "KOPIS" ? "KOPIS 수집을" : target === "EXPIRY" ? "마감 일괄 처리를" : "채널 수집을";
+      let summary: string;
+      if (target === "EXPIRY") {
+        const r = (raw ?? {}) as { expiredDeals?: number; endedShows?: number };
+        summary = `딜 ${Number(r.expiredDeals ?? 0)}건 · 공연 ${Number(r.endedShows ?? 0)}건 마감 처리했어요.`;
+      } else if (target === "CHANNELS" && Array.isArray(raw)) {
+        const rows = raw as Array<{ fetchedCount?: number; draftCount?: number; status?: string }>;
+        const fetched = rows.reduce((acc, x) => acc + Number(x.fetchedCount ?? 0), 0);
+        const drafts = rows.reduce((acc, x) => acc + Number(x.draftCount ?? 0), 0);
+        summary = `${fetched}건 확인, 초안 ${drafts}건 적재했어요.`;
+      } else {
+        const r = (raw ?? {}) as { fetchedCount?: number; status?: string; error?: string };
+        summary =
+          r.status === "FAILED"
+            ? (r.error ?? "외부 API 키가 없어 건너뛰었어요.")
             : `${Number(r.fetchedCount ?? 0)}건 확인했어요.`;
-      setMessage(`${label}을 마쳤어요. (${summary})`);
+      }
+      setMessage(`${label} 마쳤어요. (${summary})`);
       router.refresh();
     } finally {
       setSyncBusy(null);
@@ -143,25 +157,39 @@ export function AdminDealsConsole({
       body: JSON.stringify({
         showId: Number(showId),
         channelName,
-        dealType: "TIMESALE",
+        dealType,
         seatGrade: "ALL",
         basePrice: basePrice ? Number(basePrice) : null,
         salePrice: salePrice ? Number(salePrice) : null,
         isUnconditional: true,
         conditionSummary: conditionSummary || null,
+        perkSummary: perkSummary || null,
+        eventDates: eventDate ? [eventDate] : null,
+        expiresAt: expiresDate ? new Date(`${expiresDate}T23:59:59+09:00`).toISOString() : null,
         externalUrl,
         adminLocked: true,
       }),
     });
-    const json = (await res.json()) as { error?: { message: string } };
+    const json = (await res.json()) as {
+      data?: Omit<AdminDealRow, "showTitle">;
+      error?: { message: string };
+    };
     if (!res.ok) {
       setMessage(json.error?.message ?? "딜을 등록하지 못했어요. 입력값을 확인해 주세요.");
       return;
+    }
+    if (json.data) {
+      const created = json.data;
+      const showTitle = showOptions.find((s) => s.id === created.showId)?.title ?? "(미매핑)";
+      setDealList((prev) => [{ ...created, showTitle }, ...prev]);
     }
     setAdding(false);
     setSalePrice("");
     setBasePrice("");
     setConditionSummary("");
+    setPerkSummary("");
+    setEventDate("");
+    setExpiresDate("");
     setMessage("새 딜을 등록했어요.");
     router.refresh();
   }
@@ -200,7 +228,9 @@ export function AdminDealsConsole({
               ? `최근 ${lastRun.sourceName} 동기화: ${formatKstDateTime(lastRun.startedAt)} · ${lastRun.fetchedCount}건`
               : "최근 배치 이력이 없어요"}
           </span>
-          <span className="text-xs text-muted tabular-nums">수동 잠금 딜 {lockedCount}건 보호 중</span>
+          <span className="text-xs text-muted tabular-nums">
+            수집 공연 {showOptions.length}건 · 수동 잠금 딜 {lockedCount}건 보호 중
+          </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -211,6 +241,14 @@ export function AdminDealsConsole({
           >
             <span className="material-symbols-outlined text-base" aria-hidden="true">sync</span>
             <span>{syncBusy === "KOPIS" ? "실행 중..." : "KOPIS 수동 재수집"}</span>
+          </button>
+          <button
+            type="button"
+            disabled={syncBusy !== null}
+            onClick={() => triggerSync("CHANNELS")}
+            className="h-9 rounded-sm border border-outline bg-surface px-3 text-xs font-semibold text-on-surface-variant hover:bg-surface-variant disabled:opacity-60"
+          >
+            {syncBusy === "CHANNELS" ? "수집 중..." : "채널 수동 수집"}
           </button>
           <button
             type="button"
@@ -253,6 +291,15 @@ export function AdminDealsConsole({
                 <option key={s.id} value={s.id}>{s.title}</option>
               ))}
             </select>
+            <select
+              value={dealType}
+              onChange={(e) => setDealType(e.target.value as DealType)}
+              className="h-9 rounded-sm border border-outline bg-surface px-2.5 text-xs"
+            >
+              {DEAL_TYPES.map((dt) => (
+                <option key={dt} value={dt}>{DEAL_TYPE_LABELS[dt]}</option>
+              ))}
+            </select>
             <input
               type="text"
               required
@@ -262,17 +309,24 @@ export function AdminDealsConsole({
               className="h-9 rounded-sm border border-outline bg-surface px-3 text-xs"
             />
             <input
+              type="date"
+              aria-label="마감일"
+              value={expiresDate}
+              onChange={(e) => setExpiresDate(e.target.value)}
+              className="h-9 rounded-sm border border-outline bg-surface px-3 text-xs"
+            />
+            <input
               type="number"
               value={basePrice}
               onChange={(e) => setBasePrice(e.target.value)}
-              placeholder="기준 정가 (원)"
+              placeholder="기준 정가 (원 · 선택)"
               className="h-9 rounded-sm border border-outline bg-surface px-3 text-xs tabular-nums"
             />
             <input
               type="number"
               value={salePrice}
               onChange={(e) => setSalePrice(e.target.value)}
-              placeholder="할인가 (원)"
+              placeholder="할인가 (원 · 선택)"
               className="h-9 rounded-sm border border-outline bg-surface px-3 text-xs tabular-nums"
             />
             <input
@@ -287,8 +341,22 @@ export function AdminDealsConsole({
               type="text"
               value={conditionSummary}
               onChange={(e) => setConditionSummary(e.target.value)}
-              placeholder="할인 조건 요약"
+              placeholder="할인 조건 · 이벤트 요약"
               className="h-9 rounded-sm border border-outline bg-surface px-3 text-xs sm:col-span-2"
+            />
+            <input
+              type="text"
+              value={perkSummary}
+              onChange={(e) => setPerkSummary(e.target.value)}
+              placeholder="특전 내용 (예: 스페셜 포토카드 1종 증정 · 선택)"
+              className="h-9 rounded-sm border border-outline bg-surface px-3 text-xs"
+            />
+            <input
+              type="date"
+              aria-label="이벤트 회차 날짜"
+              value={eventDate}
+              onChange={(e) => setEventDate(e.target.value)}
+              className="h-9 rounded-sm border border-outline bg-surface px-3 text-xs"
             />
             <div className="sm:col-span-2 flex justify-end">
               <button
@@ -312,6 +380,14 @@ export function AdminDealsConsole({
               </tr>
             </thead>
             <tbody className="divide-y divide-outline">
+              {dealList.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-4 py-8 text-center text-xs text-muted">
+                    등록된 딜이 아직 없어요. KOPIS는 공연 목록({showOptions.length}건)만 수집하며,
+                    딜은 &apos;채널 수동 수집&apos; 후 검수 승인하거나 &apos;+ 새 딜 등록&apos;으로 추가할 수 있어요.
+                  </td>
+                </tr>
+              )}
               {dealList.map((d) => (
                 <tr key={d.id}>
                   <td className="px-4 py-3">

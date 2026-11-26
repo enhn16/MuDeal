@@ -90,6 +90,9 @@ export function MyPageWorkspace({
   const [evError, setEvError] = useState<string | null>(null);
   const [nickError, setNickError] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [withdrawConfirm, setWithdrawConfirm] = useState(false);
+  const [withdrawBusy, setWithdrawBusy] = useState(false);
+  const [withdrawError, setWithdrawError] = useState<string | null>(null);
 
   async function saveNickname() {
     const trimmed = nickDraft.trim();
@@ -116,6 +119,25 @@ export function MyPageWorkspace({
     await fetch("/api/v1/auth/logout", { method: "POST" });
     router.push("/");
     router.refresh();
+  }
+
+  async function withdrawAccount() {
+    if (withdrawBusy) return;
+    setWithdrawBusy(true);
+    setWithdrawError(null);
+    try {
+      const res = await fetch("/api/v1/me", { method: "DELETE" });
+      if (!res.ok) {
+        setWithdrawError("탈퇴를 처리하지 못했어요. 잠시 후 다시 시도해 주세요.");
+        return;
+      }
+      router.push("/");
+      router.refresh();
+    } catch {
+      setWithdrawError("연결이 원활하지 않아요. 다시 시도해 주세요.");
+    } finally {
+      setWithdrawBusy(false);
+    }
   }
 
   async function unsaveNoti(id: number) {
@@ -710,6 +732,58 @@ export function MyPageWorkspace({
                 </span>
               </div>
             ))}
+          </div>
+        )}
+      </section>
+
+      {/* 4. 회원 탈퇴 (마이페이지 최하단) */}
+      <section className="flex flex-col gap-3 rounded-lg border border-outline bg-surface p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-on-surface">회원 탈퇴</h2>
+            <p className="mt-0.5 text-xs text-muted">
+              탈퇴하면 찜한 작품, 팔로우 배우, 저장한 소식, 내 캘린더 일정이 모두 삭제돼요.
+            </p>
+          </div>
+          {!withdrawConfirm && (
+            <button
+              type="button"
+              onClick={() => {
+                setWithdrawError(null);
+                setWithdrawConfirm(true);
+              }}
+              className="h-9 shrink-0 rounded-sm border border-outline bg-surface px-3.5 text-xs font-semibold text-muted hover:border-urgent hover:text-urgent"
+            >
+              회원 탈퇴
+            </button>
+          )}
+        </div>
+
+        {withdrawConfirm && (
+          <div className="flex flex-col gap-3 rounded-md border border-urgent bg-urgent-wash p-4">
+            <p className="text-xs font-semibold text-urgent">
+              정말 탈퇴할까요? 삭제된 찜·팔로우·캘린더 기록은 되돌릴 수 없어요. 이미 게시된 제보
+              딜은 &apos;익명의 관객&apos;으로 남아 있어요.
+            </p>
+            {withdrawError && <p className="text-xs font-semibold text-urgent">{withdrawError}</p>}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={withdrawBusy}
+                onClick={() => setWithdrawConfirm(false)}
+                className="h-9 rounded-sm border border-outline bg-surface px-4 text-xs font-semibold text-on-surface-variant"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                disabled={withdrawBusy}
+                onClick={withdrawAccount}
+                className="h-9 rounded-sm bg-urgent px-4 text-xs font-semibold text-white disabled:opacity-60"
+              >
+                {withdrawBusy ? "탈퇴 처리 중..." : "탈퇴하기"}
+              </button>
+            </div>
           </div>
         )}
       </section>

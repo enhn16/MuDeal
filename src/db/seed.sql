@@ -65,5 +65,5 @@ INSERT OR IGNORE INTO home_curations (id, slot_type, show_id, eyebrow, title, su
 VALUES
   (1, 'HERO', 1, 'WEEKEND TIMEDEAL', '대극장 VIP석 최대 45% 비교', 'NOL · YES24 · 엘티켓 실시간 최저가', '/shows/1', 1, 1),
   (2, 'HERO', 1, 'PERK & GOODS', '포토카드 · 한정 굿즈 특전 모음', '유료 예매자 현장 증정 회차 한눈에', '/search?category=PERK', 2, 1),
-  (3, 'HERO', 2, 'SINGALONG & CURTAIN CALL', '싱어롱 · 특별 커튼콜 이벤트', '촬영 가능 회차와 기념 데이 모아보기', '/search?category=EVENT', 3, 1),
+  (3, 'HERO', 2, 'SINGALONG & CURTAIN CALL', '싱어롱 · 스페셜 커튼콜 이벤트', '촬영 가능 회차와 기념 데이 모아보기', '/search?category=EVENT', 3, 1),
   (4, 'SPOTLIGHT', 1, 'TODAY''S LOTTERY & SPECIAL EVENT', 'YES24데이 · NOL 로터리 · 싱어롱', '놓치기 쉬운 로터리 응모 마감과 현장 커튼콜·특전 회차를 한 번에 확인하세요.', '/search?dealType=LOTTERY', 1, 1);

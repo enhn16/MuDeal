@@ -13,7 +13,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     }
     const db = getRuntimeDb();
     const bag = parseCookieHeader(req.headers.get("cookie"));
-    const user = await getOptionalAuthUser(db, bag[ACCESS_COOKIE], getRuntimeJwtSecret());
+    const user = await getOptionalAuthUser(db, bag[ACCESS_COOKIE], getRuntimeJwtSecret(req));
     const sessionHash = await hashSessionIdentity(req);
     const data = await voteDealHelpful(db, dealId, { userId: user?.id, sessionHash });
     return Response.json({ data });

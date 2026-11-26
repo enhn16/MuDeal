@@ -13,18 +13,15 @@
   "vars": {
     "OCR_DAILY_LIMIT": "100"
   },
+  "observability": {
+    "enabled": true
+  },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "mudeal-db",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "c80e64a5-59b9-416c-8232-8f3c176c0347",
       "migrations_dir": "migrations"
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "EVIDENCE_BUCKET",
-      "bucket_name": "mudeal-evidence"
     }
   ]
 }

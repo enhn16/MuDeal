@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -13,6 +14,10 @@ export function TermsSignupForm({ defaultNickname }: { defaultNickname: string }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!nickname.trim()) {
+      setError("사용할 닉네임을 입력해 주세요.");
+      return;
+    }
     if (!agreedTerms || !agreedPrivacy) {
       setError("필수 이용약관과 개인정보처리방침에 모두 동의해 주세요.");
       return;
@@ -23,7 +28,7 @@ export function TermsSignupForm({ defaultNickname }: { defaultNickname: string }
       const res = await fetch("/api/v1/auth/complete-signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agreedTerms: true, agreedPrivacy: true, nickname }),
+        body: JSON.stringify({ agreedTerms: true, agreedPrivacy: true, nickname: nickname.trim() }),
       });
       const json = (await res.json()) as { data?: { redirectUrl: string }; error?: { message: string } };
       if (!res.ok || !json.data) {
@@ -48,31 +53,42 @@ export function TermsSignupForm({ defaultNickname }: { defaultNickname: string }
           type="text"
           maxLength={20}
           required
+          placeholder="예: 대학로산책"
           value={nickname}
           onChange={(e) => setNickname(e.target.value)}
-          className="h-10 w-full rounded-sm border border-outline bg-surface-variant px-3 text-sm text-on-surface focus:border-secondary focus:bg-surface focus:outline-none"
+          className="h-10 w-full rounded-sm border border-outline bg-surface-variant px-3 text-sm text-on-surface placeholder:text-hint focus:border-secondary focus:bg-surface focus:outline-none"
         />
       </div>
 
-      <label className="flex cursor-pointer items-center gap-2 text-sm text-body">
-        <input
-          type="checkbox"
-          checked={agreedTerms}
-          onChange={(e) => setAgreedTerms(e.target.checked)}
-          className="h-4 w-4 accent-primary"
-        />
-        <span>[필수] 서비스 이용약관 동의</span>
-      </label>
+      <div className="flex items-center justify-between gap-2 text-sm text-body">
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            checked={agreedTerms}
+            onChange={(e) => setAgreedTerms(e.target.checked)}
+            className="h-4 w-4 accent-primary"
+          />
+          <span>[필수] 서비스 이용약관 동의</span>
+        </label>
+        <Link href="/terms" target="_blank" className="text-xs text-muted underline hover:text-primary">
+          보기
+        </Link>
+      </div>
 
-      <label className="flex cursor-pointer items-center gap-2 text-sm text-body">
-        <input
-          type="checkbox"
-          checked={agreedPrivacy}
-          onChange={(e) => setAgreedPrivacy(e.target.checked)}
-          className="h-4 w-4 accent-primary"
-        />
-        <span>[필수] 개인정보 최소 수집·이용 동의</span>
-      </label>
+      <div className="flex items-center justify-between gap-2 text-sm text-body">
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            checked={agreedPrivacy}
+            onChange={(e) => setAgreedPrivacy(e.target.checked)}
+            className="h-4 w-4 accent-primary"
+          />
+          <span>[필수] 개인정보 최소 수집·이용 동의</span>
+        </label>
+        <Link href="/privacy" target="_blank" className="text-xs text-muted underline hover:text-primary">
+          보기
+        </Link>
+      </div>
 
       {error && <p className="text-xs font-semibold text-urgent">{error}</p>}
 

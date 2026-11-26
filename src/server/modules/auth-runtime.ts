@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { and, eq, sql } from "drizzle-orm";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { getRuntimeDb } from "@/db/client";
 import { userNotifications } from "@/db/schema";
 import type { CloudflareEnv } from "@/env";
@@ -8,6 +8,8 @@ import {
   ACCESS_COOKIE,
   getJwtSecret,
   getOptionalAuthUser,
+  isLocalhostHost,
+  isLocalhostOrigin,
   requireAdmin,
   requireAuth,
   type AuthUser,
@@ -17,16 +19,21 @@ export function getAuthEnv(): CloudflareEnv {
   return env as unknown as CloudflareEnv;
 }
 
-export function getRuntimeJwtSecret(): string {
-  return getJwtSecret(getAuthEnv());
+export function getRuntimeJwtSecret(req: Request): string {
+  return getJwtSecret(getAuthEnv(), { allowDevFallback: isLocalhostOrigin(new URL(req.url)) });
+}
+
+export async function getServerJwtSecret(): Promise<string> {
+  const h = await headers();
+  return getJwtSecret(getAuthEnv(), { allowDevFallback: isLocalhostHost(h.get("host")) });
 }
 
 export async function requireRuntimeAuth(req: Request): Promise<AuthUser> {
-  return requireAuth(getRuntimeDb(), req, getRuntimeJwtSecret());
+  return requireAuth(getRuntimeDb(), req, getRuntimeJwtSecret(req));
 }
 
 export async function requireRuntimeAdmin(req: Request): Promise<AuthUser> {
-  return requireAdmin(getRuntimeDb(), req, getRuntimeJwtSecret());
+  return requireAdmin(getRuntimeDb(), req, getRuntimeJwtSecret(req));
 }
 
 /** Server Component helper to read current logged-in user + unread notification count. */
@@ -36,7 +43,7 @@ export async function getServerSession(): Promise<{ user: AuthUser; unreadCount:
     const token = store.get(ACCESS_COOKIE)?.value;
     if (!token) return null;
     const db = getRuntimeDb();
-    const user = await getOptionalAuthUser(db, token, getRuntimeJwtSecret());
+    const user = await getOptionalAuthUser(db, token, await getServerJwtSecret());
     if (!user) return null;
 
     const [row] = await db

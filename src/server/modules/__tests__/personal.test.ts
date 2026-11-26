@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { buildAutoCalendarEvents } from "@/server/modules/personal";
+import { describe, expect, it, vi } from "vitest";
+import { buildAutoCalendarEvents, withdrawUserAccount } from "@/server/modules/personal";
 
 describe("personal calendar auto-event extraction", () => {
   it("extracts LOTTERY and CURTAIN_CALL dates within KST range", () => {
@@ -47,5 +47,45 @@ describe("personal calendar auto-event extraction", () => {
       eventDate: "2026-11-29",
       category: "STAGE_EVENT",
     });
+  });
+
+  it("withdrawUserAccount revokes sessions, deletes personal data, anonymizes reports, and marks WITHDRAWN", async () => {
+    const updateCalls: Array<Record<string, unknown>> = [];
+    const deleteCalls = vi.fn(async () => undefined);
+    let selectStep = 0;
+
+    const mockDb = {
+      update: () => ({
+        set: (vals: Record<string, unknown>) => {
+          updateCalls.push(vals);
+          return { where: async () => undefined };
+        },
+      }),
+      select: () => ({
+        from: () => ({
+          where: async () => {
+            selectStep += 1;
+            if (selectStep === 1) return [{ actorId: 1 }]; // followed actors
+            return [{ id: 10 }]; // user reports
+          },
+        }),
+      }),
+      delete: () => ({ where: deleteCalls }),
+    } as unknown as Parameters<typeof withdrawUserAccount>[0];
+
+    await withdrawUserAccount(mockDb, 42, new Date("2026-11-26T00:00:00.000Z"));
+
+    expect(deleteCalls).toHaveBeenCalledTimes(5);
+    expect(updateCalls.some((u) => "revokedAt" in u)).toBe(true);
+    expect(updateCalls.some((u) => u.reporterNickname === "익명의 관객")).toBe(true);
+    expect(
+      updateCalls.some(
+        (u) =>
+          u.status === "WITHDRAWN" &&
+          u.email === null &&
+          typeof u.oauthSubject === "string" &&
+          u.oauthSubject.startsWith("withdrawn:42:"),
+      ),
+    ).toBe(true);
   });
 });

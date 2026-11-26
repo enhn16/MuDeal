@@ -8,6 +8,8 @@ import {
   PENDING_COOKIE,
   buildSetCookie,
   getJwtSecret,
+  isAdminKakaoId,
+  isLocalhostOrigin,
   issueSessionCookies,
   parseCookieHeader,
   sanitizeRedirectUrl,
@@ -24,9 +26,10 @@ const BodySchema = z.object({
 
 export async function POST(req: Request) {
   try {
+    const url = new URL(req.url);
     const cfEnv = getAuthEnv();
-    const secret = getJwtSecret(cfEnv);
-    const isSecure = new URL(req.url).protocol === "https:";
+    const secret = getJwtSecret(cfEnv, { allowDevFallback: isLocalhostOrigin(url) });
+    const isSecure = url.protocol === "https:";
     const bag = parseCookieHeader(req.headers.get("cookie"));
     const pending = bag[PENDING_COOKIE]
       ? await verifyJwt<PendingSignupPayload>(bag[PENDING_COOKIE], secret)
@@ -43,7 +46,10 @@ export async function POST(req: Request) {
 
     const db = getRuntimeDb();
     const nickname = parsed.data.nickname || pending.nickname || "뮤지컬관객";
-    const role = shouldBootstrapAdmin(pending.email, cfEnv.ADMIN_OAUTH_EMAILS) ? "ADMIN" : "USER";
+    const isAdmin =
+      shouldBootstrapAdmin(pending.email, cfEnv.ADMIN_OAUTH_EMAILS) ||
+      (pending.provider === "KAKAO" && isAdminKakaoId(pending.subject, cfEnv.ADMIN_KAKAO_IDS));
+    const role = isAdmin ? "ADMIN" : "USER";
     const nowIso = new Date().toISOString();
 
     await db

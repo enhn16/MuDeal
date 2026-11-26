@@ -28,6 +28,13 @@ export const dynamic = "force-dynamic";
 
 type RawSearchParams = Promise<Record<string, string | string[] | undefined>>;
 
+function formatPriceLabel(price: number): string {
+  if (price > 0 && price % 10000 === 0) {
+    return `${(price / 10000).toLocaleString("ko-KR")}만원`;
+  }
+  return `${price.toLocaleString("ko-KR")}원`;
+}
+
 export async function generateMetadata({ searchParams }: { searchParams: RawSearchParams }): Promise<Metadata> {
   const sp = await searchParams;
   const q = parseShowSearchParams(sp);
@@ -35,13 +42,19 @@ export async function generateMetadata({ searchParams }: { searchParams: RawSear
   if (q.q) parts.push(`"${q.q}"`);
   if (q.category) parts.push(HOME_CATEGORY_LABELS[q.category]);
   if (q.regions?.length) parts.push(q.regions.map((r) => SUB_REGION_SHORT[r]).join("·"));
-  if (q.priceMax) parts.push(`${(q.priceMax / 10000).toLocaleString("ko-KR")}만원 이하`);
+  if (q.priceMin !== undefined && q.priceMax !== undefined) {
+    parts.push(`${formatPriceLabel(q.priceMin)}~${formatPriceLabel(q.priceMax)}`);
+  } else if (q.priceMin !== undefined) {
+    parts.push(`${formatPriceLabel(q.priceMin)} 이상`);
+  } else if (q.priceMax !== undefined) {
+    parts.push(`${formatPriceLabel(q.priceMax)} 이하`);
+  }
   if (q.dealType) parts.push(DEAL_TYPE_LABELS[q.dealType]);
   const summary = parts.length > 0 ? parts.join(" · ") : "전국 뮤지컬 할인·특전·이벤트";
 
   return {
     title: `${summary} 검색 — MuDeal`,
-    description: `${summary} 조건의 진행 중인 뮤지컬 할인·특전·싱어롱·특별 커튼콜을 비교해요.`,
+    description: `${summary} 조건의 진행 중인 뮤지컬 할인·특전·싱어롱·스페셜 커튼콜을 비교해요.`,
     openGraph: {
       title: `${summary} — MuDeal 뮤지컬 할인 비교`,
       description: `날짜·작품/배우·가격대·지역 4축 필터로 찾는 뮤지컬 최저가`,
@@ -72,6 +85,19 @@ function buildHref(base: ShowSearchQuery, patch: Partial<ShowSearchQuery>): stri
   const next: ShowSearchQuery = { ...base, ...patch, page: 1 };
   const qs = serializeSearchParams(toPresetParams(next));
   return qs ? `/search?${qs}` : "/search";
+}
+
+function hiddenParamInputs(query: ShowSearchQuery, omit: readonly string[]) {
+  return Object.entries(toPresetParams(query))
+    .filter(([key]) => !omit.includes(key))
+    .map(([key, value]) => (
+      <input
+        key={key}
+        type="hidden"
+        name={key}
+        value={Array.isArray(value) ? value.join(",") : String(value)}
+      />
+    ));
 }
 
 function chipClass(active: boolean) {
@@ -114,8 +140,8 @@ export default async function SearchPage({ searchParams }: { searchParams: RawSe
       query.datePreset ||
       query.dateFrom ||
       query.dateTo ||
-      query.priceMin ||
-      query.priceMax ||
+      query.priceMin !== undefined ||
+      query.priceMax !== undefined ||
       query.regions?.length ||
       query.category ||
       query.dealType ||
@@ -193,18 +219,13 @@ export default async function SearchPage({ searchParams }: { searchParams: RawSe
                   {label}
                 </Link>
               ))}
-              <form action="/search" method="get" className="inline-flex flex-wrap items-center gap-1.5">
-                {query.q && <input type="hidden" name="q" value={query.q} />}
-                {query.regions && <input type="hidden" name="region" value={query.regions.join(",")} />}
-                {query.priceMax && <input type="hidden" name="priceMax" value={query.priceMax} />}
-                {query.category && <input type="hidden" name="category" value={query.category} />}
-                {query.dealType && <input type="hidden" name="dealType" value={query.dealType} />}
-                {query.unconditionalOnly && <input type="hidden" name="unconditionalOnly" value="1" />}
-                {query.conditionTags && (
-                  <input type="hidden" name="conditionTags" value={query.conditionTags.join(",")} />
-                )}
-                {query.source && <input type="hidden" name="source" value={query.source} />}
-                {query.sort && <input type="hidden" name="sort" value={query.sort} />}
+              <form
+                key={`${query.dateFrom ?? ""}-${query.dateTo ?? ""}`}
+                action="/search"
+                method="get"
+                className="inline-flex flex-wrap items-center gap-1.5"
+              >
+                {hiddenParamInputs(query, ["datePreset", "dateFrom", "dateTo"])}
                 <input
                   type="date"
                   name="dateFrom"
@@ -252,22 +273,75 @@ export default async function SearchPage({ searchParams }: { searchParams: RawSe
             </div>
           </div>
 
-          {/* Axis 4: 가격대 & 세부 조건 */}
+          {/* Axis 4: 가격 */}
           <div className="grid grid-cols-1 items-center gap-2 md:grid-cols-12">
-            <span className="text-xs font-semibold text-on-surface md:col-span-2">가격 · 조건</span>
+            <span className="text-xs font-semibold text-on-surface md:col-span-2">가격</span>
             <div className="flex flex-wrap items-center gap-2 md:col-span-10">
-              {pricePresets.map((max) => (
-                <Link
-                  key={max}
-                  href={buildHref(query, {
-                    priceMin: undefined,
-                    priceMax: query.priceMax === max ? undefined : max,
-                  })}
-                  className={`${chipClass(query.priceMax === max)} tabular-nums`}
+              {pricePresets.map((max) => {
+                const active = query.priceMin === undefined && query.priceMax === max;
+                return (
+                  <Link
+                    key={max}
+                    href={buildHref(query, {
+                      priceMin: undefined,
+                      priceMax: active ? undefined : max,
+                    })}
+                    className={`${chipClass(active)} tabular-nums`}
+                  >
+                    {max / 10000}만원 이하
+                  </Link>
+                );
+              })}
+              <form
+                key={`${query.priceMin ?? ""}-${query.priceMax ?? ""}`}
+                action="/search"
+                method="get"
+                className="inline-flex flex-wrap items-center gap-1.5"
+              >
+                {hiddenParamInputs(query, ["priceMin", "priceMax"])}
+                <label className="inline-flex h-8 items-center gap-1 rounded-xs border border-outline bg-surface px-2 focus-within:border-secondary">
+                  <input
+                    type="number"
+                    name="priceMin"
+                    min={0}
+                    step={1000}
+                    inputMode="numeric"
+                    aria-label="최소 가격 (원)"
+                    placeholder="최소 금액"
+                    defaultValue={query.priceMin ?? ""}
+                    className="w-20 bg-transparent text-xs text-on-surface tabular-nums placeholder:text-hint focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  />
+                  <span className="text-[11px] text-muted">원</span>
+                </label>
+                <span className="text-xs text-muted">~</span>
+                <label className="inline-flex h-8 items-center gap-1 rounded-xs border border-outline bg-surface px-2 focus-within:border-secondary">
+                  <input
+                    type="number"
+                    name="priceMax"
+                    min={0}
+                    step={1000}
+                    inputMode="numeric"
+                    aria-label="최대 가격 (원)"
+                    placeholder="최대 금액"
+                    defaultValue={query.priceMax ?? ""}
+                    className="w-20 bg-transparent text-xs text-on-surface tabular-nums placeholder:text-hint focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  />
+                  <span className="text-[11px] text-muted">원</span>
+                </label>
+                <button
+                  type="submit"
+                  className="h-8 rounded-xs bg-primary px-3 text-xs font-semibold text-on-primary hover:bg-secondary"
                 >
-                  {max / 10000}만원 이하
-                </Link>
-              ))}
+                  가격 적용
+                </button>
+              </form>
+            </div>
+          </div>
+
+          {/* Axis 5: 조건 */}
+          <div className="grid grid-cols-1 items-center gap-2 md:grid-cols-12">
+            <span className="text-xs font-semibold text-on-surface md:col-span-2">조건</span>
+            <div className="flex flex-wrap items-center gap-2 md:col-span-10">
               <Link
                 href={buildHref(query, { unconditionalOnly: !query.unconditionalOnly })}
                 className={chipClass(Boolean(query.unconditionalOnly))}
@@ -295,8 +369,15 @@ export default async function SearchPage({ searchParams }: { searchParams: RawSe
                 isLoggedIn={Boolean(session)}
               />
               {query.q && (
-                <span className="rounded-xs bg-rose-mist px-2.5 py-1 font-semibold text-primary">
-                  검색어: {query.q}
+                <span className="inline-flex h-8 items-center gap-1.5 rounded-xs bg-rose-mist px-2.5 font-semibold text-primary">
+                  <span>검색어: {query.q}</span>
+                  <Link
+                    href={buildHref(query, { q: undefined })}
+                    aria-label="검색어 지우기"
+                    className="inline-flex h-4 w-4 items-center justify-center rounded-xs text-sm leading-none text-primary/70 transition-colors hover:bg-primary/10 hover:text-primary"
+                  >
+                    ×
+                  </Link>
                 </span>
               )}
               {hasFilters && (

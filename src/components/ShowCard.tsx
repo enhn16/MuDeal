@@ -2,6 +2,7 @@ import Link from "next/link";
 import { DEAL_TYPE_LABELS, SUB_REGION_SHORT, dealBadgeClass } from "@/lib/labels";
 import { formatKrw } from "@/lib/pricing";
 import type { HomeCategory, ShowCardItem } from "@/server/modules/shows";
+import { PosterImage } from "./PosterImage";
 
 export function PosterArtwork({
   title,
@@ -10,28 +11,7 @@ export function PosterArtwork({
   title: string;
   posterUrl: string | null;
 }) {
-  if (posterUrl) {
-    return (
-      <img
-        src={posterUrl}
-        alt={`${title} 포스터`}
-        className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
-      />
-    );
-  }
-  return (
-    <div
-      aria-label={`${title} 포스터 준비 중`}
-      className="flex h-full w-full items-center justify-center bg-curtain-noir transition-transform duration-200 group-hover:scale-[1.02]"
-    >
-      <span
-        className="material-symbols-outlined text-4xl text-white/15"
-        aria-hidden="true"
-      >
-        theater_comedy
-      </span>
-    </div>
-  );
+  return <PosterImage title={title} posterUrl={posterUrl} />;
 }
 
 export function ShowCard({
@@ -56,7 +36,7 @@ export function ShowCard({
     : isEventView && show.eventHighlight
       ? show.eventHighlight.dealType === "SINGALONG"
         ? "싱어롱"
-        : "특별 커튼콜"
+        : "스페셜 커튼콜"
       : show.primaryDealType === "TIMESALE" && show.isUnconditional
         ? "무조건 할인"
         : DEAL_TYPE_LABELS[show.primaryDealType];

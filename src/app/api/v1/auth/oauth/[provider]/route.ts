@@ -19,7 +19,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
     const redirectUrl = sanitizeRedirectUrl(url.searchParams.get("redirectUrl"), "/");
     const devAs = url.searchParams.get("as");
     const cfEnv = getAuthEnv();
-    const secret = getJwtSecret(cfEnv);
+    const secret = getJwtSecret(cfEnv, { allowDevFallback: isLocalhostOrigin(url) });
 
     const state = randomTokenHex(16);
     const stateJwt = await signJwt({ state, redirectUrl, provider }, secret, 600);
