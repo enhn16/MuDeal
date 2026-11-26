@@ -7,7 +7,7 @@ import { FollowActorButton, WishButton } from "@/components/PersonalButtons";
 import { PosterArtwork } from "@/components/ShowCard";
 import { ShowComparePanel } from "@/components/ShowComparePanel";
 import { TargetNewsFeed } from "@/components/TargetNewsFeed";
-import { formatKstDate } from "@/lib/kst";
+import { formatKstDate, formatShowPeriod } from "@/lib/kst";
 import { DEAL_TYPE_LABELS, SUB_REGION_LABELS } from "@/lib/labels";
 import { formatKrw } from "@/lib/pricing";
 import { getServerSession } from "@/server/modules/auth-runtime";
@@ -27,13 +27,19 @@ export async function generateMetadata({ params }: { params: ShowRouteParams }):
   if (!data) return { title: "작품을 찾을 수 없습니다 — MuDeal" };
 
   const lowest = data.summary.generalLowest ?? data.summary.conditionalLowest;
-  const priceText = lowest
-    ? `${lowest.discountRate ? `최대 ${lowest.discountRate}% ` : ""}${formatKrw(lowest.salePrice)}~`
-    : "할인·이벤트 비교";
+  const maxRate = data.deals.reduce<number | null>(
+    (m, d) => (d.discountRate !== null && (m === null || d.discountRate > m) ? d.discountRate : m),
+    null,
+  );
+  const priceText = lowest?.salePrice
+    ? `${maxRate ? `최대 ${maxRate}% ` : ""}${formatKrw(lowest.salePrice)}~`
+    : maxRate
+      ? `최대 ${maxRate}% 할인`
+      : "할인·이벤트 비교";
 
   return {
     title: `${data.show.title} (${priceText}) — MuDeal`,
-    description: `${data.show.venueName} · ${priceText} 예매처별 가격 비교, 싱어롱·커튼콜·특전 및 출연 배우 정보`,
+    description: `${data.show.venueName} · ${priceText} 예매처별 가격 비교, 싱어롱·스페셜 커튼콜·특전 및 출연 배우 정보`,
     openGraph: {
       title: `${data.show.title} · ${priceText}`,
       description: `${data.show.venueName} | 예매처별 할인 비교 · MuDeal`,
@@ -85,7 +91,7 @@ export default async function ShowDetailPage({ params }: { params: ShowRoutePara
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <WishButton showId={data.show.id} initialBookmarked={bookmarked} />
+                <WishButton showId={data.show.id} initialBookmarked={bookmarked} isLoggedIn={Boolean(session)} />
                 <ShareLinkButton iconOnly />
               </div>
             </div>
@@ -103,7 +109,7 @@ export default async function ShowDetailPage({ params }: { params: ShowRoutePara
                 <span>{data.show.venueName}</span>
               </Link>
               <span className="tabular-nums">
-                {data.show.startDate.replaceAll("-", ".")} ~ {data.show.endDate.replaceAll("-", ".")}
+                {formatShowPeriod(data.show.startDate, data.show.endDate)}
               </span>
             </div>
           </div>
@@ -213,6 +219,7 @@ export default async function ShowDetailPage({ params }: { params: ShowRoutePara
                   <FollowActorButton
                     actorId={actor.id}
                     initialFollowed={isFollowed}
+                    isLoggedIn={Boolean(session)}
                     size="sm"
                   />
                 </div>
@@ -240,6 +247,7 @@ export default async function ShowDetailPage({ params }: { params: ShowRoutePara
           showId={data.show.id}
           showTitle={data.show.title}
           todayKst={todayKst}
+          isLoggedIn={Boolean(session)}
           deals={data.deals}
           seatGrades={data.seatGrades}
           lastVerifiedAt={data.lastVerifiedAt}

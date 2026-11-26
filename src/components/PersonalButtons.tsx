@@ -9,15 +9,21 @@ import { serializeSearchParams } from "@/lib/url";
 export function WishButton({
   showId,
   initialBookmarked,
+  isLoggedIn,
 }: {
   showId: number;
   initialBookmarked: boolean;
+  isLoggedIn?: boolean;
 }) {
   const router = useRouter();
   const [bookmarked, setBookmarked] = useState(initialBookmarked);
   const [busy, setBusy] = useState(false);
 
   async function toggle() {
+    if (isLoggedIn === false) {
+      router.push(`/login?redirectUrl=${encodeURIComponent(`/shows/${showId}`)}`);
+      return;
+    }
     if (busy) return;
     setBusy(true);
     try {
@@ -58,10 +64,12 @@ export function WishButton({
 export function FollowActorButton({
   actorId,
   initialFollowed,
+  isLoggedIn,
   size = "md",
 }: {
   actorId: number;
   initialFollowed: boolean;
+  isLoggedIn?: boolean;
   size?: "sm" | "md";
 }) {
   const router = useRouter();
@@ -69,6 +77,10 @@ export function FollowActorButton({
   const [busy, setBusy] = useState(false);
 
   async function toggle() {
+    if (isLoggedIn === false) {
+      router.push(`/login?redirectUrl=${encodeURIComponent(window.location.pathname)}`);
+      return;
+    }
     if (busy) return;
     setBusy(true);
     try {
@@ -111,16 +123,22 @@ export function AddShowToCalendarButton({
   showId,
   showTitle,
   todayKst,
+  isLoggedIn,
 }: {
   showId: number;
   showTitle: string;
   todayKst: string;
+  isLoggedIn?: boolean;
 }) {
   const router = useRouter();
   const [added, setAdded] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function add() {
+    if (isLoggedIn === false) {
+      router.push(`/login?redirectUrl=${encodeURIComponent(`/shows/${showId}`)}`);
+      return;
+    }
     if (busy || added) return;
     setBusy(true);
     try {

@@ -14,7 +14,7 @@ export interface PricedDealRow {
   dealType: DealType;
   seatGrade: SeatGrade;
   basePrice: number | null;
-  salePrice: number;
+  salePrice: number | null;
   discountRate: number | null;
   isUnconditional: boolean;
   conditionTags: ConditionTag[];
@@ -35,6 +35,7 @@ export function ShowComparePanel({
   showId,
   showTitle,
   todayKst,
+  isLoggedIn,
   deals,
   seatGrades,
   lastVerifiedAt,
@@ -45,6 +46,7 @@ export function ShowComparePanel({
   showId: number;
   showTitle: string;
   todayKst: string;
+  isLoggedIn: boolean;
   deals: PricedDealRow[];
   seatGrades: SeatGrade[];
   lastVerifiedAt: string;
@@ -138,7 +140,7 @@ export function ShowComparePanel({
                       </span>
                     )}
                     <span className="text-xl font-semibold text-on-surface">
-                      {formatKrw(generalLowest.salePrice)}
+                      {generalLowest.salePrice !== null ? formatKrw(generalLowest.salePrice) : "할인 적용"}
                     </span>
                     {generalLowest.basePrice && (
                       <span className="text-[13px] text-muted line-through">
@@ -166,7 +168,7 @@ export function ShowComparePanel({
                       </span>
                     )}
                     <span className="text-xl font-semibold text-on-surface">
-                      {formatKrw(conditionalLowest.salePrice)}
+                      {conditionalLowest.salePrice !== null ? formatKrw(conditionalLowest.salePrice) : "할인 적용"}
                     </span>
                     {conditionalLowest.basePrice && (
                       <span className="text-[13px] text-muted line-through">
@@ -275,7 +277,7 @@ export function ShowComparePanel({
                               </span>
                             )}
                             <span className="text-lg font-bold text-on-surface">
-                              {formatKrw(deal.salePrice)}
+                              {deal.salePrice !== null ? formatKrw(deal.salePrice) : "할인"}
                             </span>
                           </div>
                         </td>
@@ -315,7 +317,7 @@ export function ShowComparePanel({
                   <span className="text-2xl font-bold text-secondary">{topDeal.discountRate}%</span>
                 )}
                 <span className="text-2xl font-bold text-on-surface">
-                  {formatKrw(topDeal.salePrice)}
+                  {topDeal.salePrice !== null ? formatKrw(topDeal.salePrice) : "할인"}
                 </span>
               </div>
               {topDeal.basePrice && (
@@ -359,7 +361,11 @@ export function ShowComparePanel({
                   </span>
                 </div>
                 <span className="text-[15px] font-semibold text-on-surface tabular-nums">
-                  {formatKrw(d.salePrice)}
+                  {d.salePrice !== null
+                    ? formatKrw(d.salePrice)
+                    : d.discountRate !== null
+                      ? `${d.discountRate}% 할인`
+                      : "할인"}
                 </span>
               </div>
             ))}
@@ -376,7 +382,12 @@ export function ShowComparePanel({
               className="h-12 w-full text-[15px]"
             />
           )}
-          <AddShowToCalendarButton showId={showId} showTitle={showTitle} todayKst={todayKst} />
+          <AddShowToCalendarButton
+            showId={showId}
+            showTitle={showTitle}
+            todayKst={todayKst}
+            isLoggedIn={isLoggedIn}
+          />
         </div>
       </aside>
     </div>

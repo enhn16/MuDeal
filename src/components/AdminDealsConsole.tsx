@@ -65,7 +65,7 @@ export function AdminDealsConsole({
   const lockedCount = dealList.filter((d) => d.adminLocked === 1).length;
   const lastRun = latestSync[0];
 
-  async function triggerSync(target: "KOPIS" | "CHANNELS" | "EXPIRY") {
+  async function triggerSync(target: "KOPIS" | "CHANNELS" | "OCR" | "EXPIRY") {
     setSyncBusy(target);
     setMessage(null);
     try {
@@ -83,11 +83,23 @@ export function AdminDealsConsole({
         return;
       }
       const raw = json.data?.result;
-      const label = target === "KOPIS" ? "KOPIS 수집을" : target === "EXPIRY" ? "마감 일괄 처리를" : "채널 수집을";
+      const label =
+        target === "KOPIS"
+          ? "KOPIS 수집을"
+          : target === "EXPIRY"
+            ? "마감 일괄 처리를"
+            : target === "OCR"
+              ? "NOL 공지 OCR을"
+              : "채널 수집을";
       let summary: string;
       if (target === "EXPIRY") {
         const r = (raw ?? {}) as { expiredDeals?: number; endedShows?: number };
         summary = `딜 ${Number(r.expiredDeals ?? 0)}건 · 공연 ${Number(r.endedShows ?? 0)}건 마감 처리했어요.`;
+      } else if (target === "OCR") {
+        const r = (raw ?? {}) as { processed?: number; draftsCreated?: number; skippedByLimit?: boolean };
+        summary = r.skippedByLimit
+          ? "오늘 일일 OCR 상한에 도달했어요."
+          : `이미지 ${Number(r.processed ?? 0)}장 분석 · 혜택 ${Number(r.draftsCreated ?? 0)}건 추출했어요.`;
       } else if (target === "CHANNELS" && Array.isArray(raw)) {
         const rows = raw as Array<{ fetchedCount?: number; publishedCount?: number; draftCount?: number; status?: string }>;
         const fetched = rows.reduce((acc, x) => acc + Number(x.fetchedCount ?? 0), 0);
@@ -250,6 +262,14 @@ export function AdminDealsConsole({
             className="h-9 rounded-sm border border-outline bg-surface px-3 text-xs font-semibold text-on-surface-variant hover:bg-surface-variant disabled:opacity-60"
           >
             {syncBusy === "CHANNELS" ? "수집 중..." : "채널 수동 수집"}
+          </button>
+          <button
+            type="button"
+            disabled={syncBusy !== null}
+            onClick={() => triggerSync("OCR")}
+            className="h-9 rounded-sm border border-outline bg-surface px-3 text-xs font-semibold text-on-surface-variant hover:bg-surface-variant disabled:opacity-60"
+          >
+            {syncBusy === "OCR" ? "OCR 중..." : "NOL OCR 실행"}
           </button>
           <button
             type="button"

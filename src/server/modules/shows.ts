@@ -23,25 +23,21 @@ export type HomeCategory = "DISCOUNT" | "PERK" | "EVENT";
 
 export const HOME_CATEGORIES: readonly HomeCategory[] = ["DISCOUNT", "PERK", "EVENT"] as const;
 
-const DISCOUNT_DEAL_TYPES = new Set<DealType>([
-  "TIMESALE",
-  "LOTTERY",
-  "DISCOUNT_SITE",
-  "CARD_EVENT",
-  "SPECIAL_DAY",
-]);
-
 export function dealMatchesCategory(
-  deal: Pick<typeof deals.$inferSelect, "dealType" | "salePrice" | "perkSummary">,
+  deal: Pick<typeof deals.$inferSelect, "dealType" | "salePrice" | "discountRate" | "perkSummary">,
   category: HomeCategory,
 ): boolean {
   if (category === "DISCOUNT") {
-    return deal.salePrice !== null || DISCOUNT_DEAL_TYPES.has(deal.dealType);
+    return deal.salePrice !== null || deal.discountRate !== null || deal.dealType === "LOTTERY";
   }
   if (category === "PERK") {
     return deal.dealType === "PERK_GOODS" || Boolean(deal.perkSummary?.trim());
   }
-  return deal.dealType === "SINGALONG" || deal.dealType === "CURTAIN_CALL";
+  return (
+    deal.dealType === "SINGALONG" ||
+    deal.dealType === "CURTAIN_CALL" ||
+    (deal.dealType === "SPECIAL_DAY" && deal.salePrice === null && deal.discountRate === null)
+  );
 }
 
 export interface ShowSearchQuery {
@@ -138,9 +134,9 @@ function toShowCard(
   const perkDeal =
     showDeals.find((d) => d.dealType === "PERK_GOODS") ??
     showDeals.find((d) => Boolean(d.perkSummary?.trim()));
-  const eventDeal = showDeals.find(
-    (d) => d.dealType === "SINGALONG" || d.dealType === "CURTAIN_CALL",
-  );
+  const eventDeal =
+    showDeals.find((d) => d.dealType === "SINGALONG" || d.dealType === "CURTAIN_CALL") ??
+    showDeals.find((d) => d.dealType === "SPECIAL_DAY" && d.salePrice === null && d.discountRate === null);
   const eventDates = eventDeal ? parseJsonArray<string>(eventDeal.eventDatesJson) : [];
 
   return {
@@ -154,7 +150,7 @@ function toShowCard(
     channelCount: channels.size,
     lowestPrice: topDeal?.salePrice ?? null,
     basePrice: topDeal?.basePrice ?? null,
-    maxDiscountRate: priced.reduce<number | null>(
+    maxDiscountRate: showDeals.reduce<number | null>(
       (max, d) => (d.discountRate !== null && (max === null || d.discountRate > max) ? d.discountRate : max),
       null,
     ),
@@ -163,8 +159,10 @@ function toShowCard(
     perkHighlight: perkDeal ? perkDeal.perkSummary?.trim() || perkDeal.conditionSummary || "현장 특전 증정" : null,
     eventHighlight: eventDeal
       ? {
-          dealType: eventDeal.dealType as "SINGALONG" | "CURTAIN_CALL",
-          summary: eventDeal.conditionSummary || (eventDeal.dealType === "SINGALONG" ? "싱어롱 이벤트" : "스페셜 커튼콜 이벤트"),
+          dealType: (eventDeal.dealType === "SINGALONG" ? "SINGALONG" : "CURTAIN_CALL") as "SINGALONG" | "CURTAIN_CALL",
+          summary:
+            eventDeal.conditionSummary ||
+            (eventDeal.dealType === "SINGALONG" ? "싱어롱 이벤트" : "스페셜 커튼콜 이벤트"),
           date: eventDates[0] ?? null,
         }
       : null,
@@ -470,7 +468,7 @@ export async function getShowDetail(db: AppDb, showId: number, now = new Date())
   ]);
 
   const pricedDeals = dealRows
-    .filter((d) => d.salePrice !== null)
+    .filter((d) => d.salePrice !== null || d.discountRate !== null)
     .sort(compareDealsForDisplay)
     .map((d) => ({
       id: d.id,
@@ -478,7 +476,7 @@ export async function getShowDetail(db: AppDb, showId: number, now = new Date())
       dealType: d.dealType,
       seatGrade: d.seatGrade,
       basePrice: d.basePrice,
-      salePrice: d.salePrice!,
+      salePrice: d.salePrice,
       discountRate: d.discountRate,
       isUnconditional: Boolean(d.isUnconditional),
       conditionTags: parseJsonArray<ConditionTag>(d.conditionTagsJson),
@@ -495,7 +493,13 @@ export async function getShowDetail(db: AppDb, showId: number, now = new Date())
     }));
 
   const events = dealRows
-    .filter((d) => d.dealType === "SINGALONG" || d.dealType === "CURTAIN_CALL" || d.dealType === "PERK_GOODS")
+    .filter(
+      (d) =>
+        d.dealType === "SINGALONG" ||
+        d.dealType === "CURTAIN_CALL" ||
+        d.dealType === "PERK_GOODS" ||
+        (d.dealType === "SPECIAL_DAY" && d.salePrice === null && d.discountRate === null),
+    )
     .map((d) => ({
       id: d.id,
       channelName: d.channelName,

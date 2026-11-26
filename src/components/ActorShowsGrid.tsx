@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import type { SubRegion } from "@/db/schema";
+import { formatShowPeriod } from "@/lib/kst";
 import { PosterArtwork } from "./ShowCard";
 
 export interface ActorAppearanceItem {
@@ -75,7 +76,7 @@ export function ActorShowsGrid({ shows }: { shows: ActorAppearanceItem[] }) {
                   <span className="shrink-0 tabular-nums">
                     {show.status === "UPCOMING"
                       ? `${show.startDate.replaceAll("-", ".")} 개막`
-                      : `${show.startDate.replaceAll("-", ".")} ~ ${show.endDate.replaceAll("-", ".")}`}
+                      : formatShowPeriod(show.startDate, show.endDate)}
                   </span>
                 </div>
                 <h3 className="text-[15px] font-semibold text-on-surface group-hover:text-primary">

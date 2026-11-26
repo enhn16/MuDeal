@@ -5,7 +5,7 @@ import { actors, shows } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
 
-const SITE_URL = "https://mudeal.kr";
+const SITE_URL = "https://mudeal.mudeal.workers.dev";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const staticUrls: MetadataRoute.Sitemap = [

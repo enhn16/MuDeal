@@ -43,6 +43,12 @@ const KIDS_TITLE_KEYWORDS = [
   "겨울왕국 [성남]",
   "AI세계에서 살아남기",
   "타키포오",
+  "배고픈 애벌레",
+  "100층짜리 집",
+  "과학마술",
+  "멜로우TV",
+  "명화배달부",
+  "고래밥",
 ];
 
 const KIDS_VENUE_KEYWORDS = [

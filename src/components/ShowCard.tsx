@@ -86,8 +86,10 @@ export function ShowCard({
               <span className="text-[16px] font-bold text-on-surface">
                 {formatKrw(show.lowestPrice)}~
               </span>
+            ) : show.maxDiscountRate !== null ? (
+              <span className="text-sm font-semibold text-on-surface">특별 할인</span>
             ) : (
-              <span className="text-sm font-semibold text-primary">이벤트 · 오픈 진행 중</span>
+              <span className="text-sm font-semibold text-primary">특전 · 이벤트 진행 중</span>
             )}
             {show.basePrice !== null && show.lowestPrice !== null && show.basePrice > show.lowestPrice && (
               <span className="text-xs text-hint line-through">{formatKrw(show.basePrice)}</span>

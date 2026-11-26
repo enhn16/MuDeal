@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 
-const SITE_URL = "https://mudeal.kr";
+const SITE_URL = "https://mudeal.mudeal.workers.dev";
 
 export default function robots(): MetadataRoute.Robots {
   return {

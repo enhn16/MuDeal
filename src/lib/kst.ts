@@ -10,6 +10,13 @@ export function formatKstDate(now = new Date()): string {
   return toKstShifted(now).toISOString().slice(0, 10);
 }
 
+/** Format a show run period, displaying open-run sentinel dates (2099+) as '오픈런'. */
+export function formatShowPeriod(startDate: string, endDate: string): string {
+  const start = startDate.replaceAll("-", ".");
+  const end = endDate >= "2099-01-01" ? "오픈런" : endDate.replaceAll("-", ".");
+  return `${start} ~ ${end}`;
+}
+
 /** Format an ISO/UTC timestamp or Date as KST MM.DD HH:mm. */
 export function formatKstDateTime(value: string | Date): string {
   const date = typeof value === "string" ? new Date(value) : value;

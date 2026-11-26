@@ -5,7 +5,7 @@ import { getServerSession } from "@/server/modules/auth-runtime";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://mudeal.kr"),
+  metadataBase: new URL("https://mudeal.mudeal.workers.dev"),
   title: "MuDeal — 전국 뮤지컬 할인·특전·싱어롱 비교",
   description:
     "전국 뮤지컬 티켓 할인, 로터리, 특전, 싱어롱·스페셜 커튼콜을 날짜·작품/배우·가격대·지역으로 한눈에 비교해요.",
