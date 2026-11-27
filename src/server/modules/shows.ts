@@ -84,6 +84,7 @@ export interface ShowCardItem {
   categories: HomeCategory[];
   discountDates: string[];
   discountExpiresAt: string | null;
+  discountDDay: number | null;
   perkHighlight: string | null;
   perkDates: string[];
   eventHighlight: {
@@ -230,6 +231,10 @@ function toShowCard(
   const eventDeal = eventEntry?.deal ?? null;
   const eventDates = eventEntry?.dates ?? [];
 
+  const topDiscountTarget =
+    topEntry?.expiresAt ?? topEntry?.eventDates.at(-1) ?? null;
+  const discountDDay = topDiscountTarget ? calcKstDDay(topDiscountTarget, now) : null;
+
   return {
     id: show.id,
     title: show.title,
@@ -246,6 +251,7 @@ function toShowCard(
     categories,
     discountDates: topEntry?.eventDates ?? [],
     discountExpiresAt: topEntry?.expiresAt ?? null,
+    discountDDay,
     perkHighlight: perkDeal ? perkDeal.perkSummary?.trim() || perkDeal.conditionSummary || "현장 특전 증정" : null,
     perkDates,
     eventHighlight: eventDeal

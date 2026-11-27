@@ -326,7 +326,7 @@ export function MyPageWorkspace({
                 const href =
                   story.targetType === "ACTOR"
                     ? `/actors/${story.targetId}#news-feed`
-                    : `/shows/${story.targetId}#news-feed`;
+                    : `/shows/${story.targetId}/feed`;
 
                 return (
                   <Link

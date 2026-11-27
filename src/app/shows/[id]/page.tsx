@@ -8,7 +8,6 @@ import { FollowActorButton, WishButton } from "@/components/PersonalButtons";
 import { PosterArtwork } from "@/components/ShowCard";
 import { ShowComparePanel } from "@/components/ShowComparePanel";
 import { ShowSynopsis } from "@/components/ShowSynopsis";
-import { TargetNewsFeed } from "@/components/TargetNewsFeed";
 import { formatEventDates, formatEventDateWithDow, formatKstDate, formatShowPeriod } from "@/lib/kst";
 import { DEAL_TYPE_LABELS, SUB_REGION_LABELS } from "@/lib/labels";
 import { formatKrw } from "@/lib/pricing";
@@ -234,15 +233,6 @@ export default async function ShowDetailPage({ params }: { params: ShowRoutePara
           </div>
         )}
       </section>
-
-      {/* 2-5. 작품 새소식 피드 (#news-feed) */}
-      <TargetNewsFeed
-        targetType="SHOW"
-        targetId={data.show.id}
-        heading="작품 새소식 피드"
-        isLoggedIn={Boolean(session)}
-        todayKst={todayKst}
-      />
     </>
   );
 

@@ -288,6 +288,7 @@ describe("4-axis show search filter", () => {
     expect(card.maxDiscountRate).toBe(50);
     expect(card.lowestPrice).toBe(44000);
     expect(card.discountDates).toEqual(["2026-11-25", "2026-11-26", "2026-11-27"]);
+    expect(card.discountDDay).toBe(2); // 2026-11-27 KST from top deal's expiresAt
     expect(card.perkHighlight).toBe("현재 진행 중 탁상달력 특전");
     expect(card.perkDates).toEqual(["2026-11-24", "2026-11-25", "2026-11-26"]);
   });
