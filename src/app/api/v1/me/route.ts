@@ -4,7 +4,7 @@ import { getRuntimeDb } from "@/db/client";
 import { userNotifications } from "@/db/schema";
 import { AppError, jsonError } from "@/lib/errors";
 import { ACCESS_COOKIE, REFRESH_COOKIE, buildSetCookie } from "@/server/modules/auth";
-import { requireRuntimeAuth } from "@/server/modules/auth-runtime";
+import { getAuthEnv, requireRuntimeAuth } from "@/server/modules/auth-runtime";
 import { updateNickname, withdrawUserAccount } from "@/server/modules/personal";
 
 export async function GET(req: Request) {
@@ -41,7 +41,9 @@ export async function DELETE(req: Request) {
   try {
     const db = getRuntimeDb();
     const user = await requireRuntimeAuth(req);
-    await withdrawUserAccount(db, user.id);
+    await withdrawUserAccount(db, user.id, new Date(), {
+      evidenceBucket: getAuthEnv().EVIDENCE_BUCKET,
+    });
 
     const isSecure = new URL(req.url).protocol === "https:";
     const headers = new Headers({ "Content-Type": "application/json" });

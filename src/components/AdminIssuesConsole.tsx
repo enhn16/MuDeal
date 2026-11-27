@@ -31,19 +31,33 @@ export function AdminIssuesConsole({ initialIssues }: { initialIssues: IssueItem
   const router = useRouter();
   const [issues, setIssues] = useState(initialIssues);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function resolve(issueId: number, action: "EXPIRE_DEAL" | "RESOLVE" | "DISMISS") {
+    if (busyId !== null) return;
     setBusyId(issueId);
+    setError(null);
     try {
       const res = await fetch(`/api/v1/admin/issues/${issueId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
       });
-      if (res.ok) {
-        setIssues((prev) => prev.filter((i) => i.issue.id !== issueId));
-        router.refresh();
+      if (!res.ok) {
+        const json = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+        if (res.status === 409) {
+          setIssues((prev) => prev.filter((i) => i.issue.id !== issueId));
+          setError(json.error?.message ?? "이미 처리된 오류 신고예요.");
+          router.refresh();
+          return;
+        }
+        setError(json.error?.message ?? "오류 신고를 처리하지 못했어요. 잠시 후 다시 시도해 주세요.");
+        return;
       }
+      setIssues((prev) => prev.filter((i) => i.issue.id !== issueId));
+      router.refresh();
+    } catch {
+      setError("네트워크 연결이 원활하지 않아요. 잠시 후 다시 시도해 주세요.");
     } finally {
       setBusyId(null);
     }
@@ -51,14 +65,26 @@ export function AdminIssuesConsole({ initialIssues }: { initialIssues: IssueItem
 
   if (issues.length === 0) {
     return (
-      <div className="rounded-lg border border-outline bg-surface p-10 text-center text-sm text-muted">
-        처리 대기 중인 오류 신고가 없어요.
+      <div className="flex flex-col gap-3">
+        {error && (
+          <p role="alert" className="rounded-sm border border-urgent bg-urgent-wash px-4 py-2.5 text-xs font-semibold text-urgent">
+            {error}
+          </p>
+        )}
+        <div className="rounded-lg border border-outline bg-surface p-10 text-center text-sm text-muted">
+          처리 대기 중인 오류 신고가 없어요.
+        </div>
       </div>
     );
   }
 
   return (
     <div className="flex flex-col gap-4">
+      {error && (
+        <p role="alert" className="rounded-sm border border-urgent bg-urgent-wash px-4 py-2.5 text-xs font-semibold text-urgent">
+          {error}
+        </p>
+      )}
       {issues.map(({ issue, channelName, showId, showTitle }) => (
         <article
           key={issue.id}
@@ -89,7 +115,7 @@ export function AdminIssuesConsole({ initialIssues }: { initialIssues: IssueItem
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-outline pt-3">
             {showId ? (
               <Link href={`/shows/${showId}`} className="text-xs font-semibold text-primary hover:underline">
-                작품 상세 페이지 확인 ↗
+                작품 상세 페이지 확인 →
               </Link>
             ) : (
               <span />
@@ -99,17 +125,17 @@ export function AdminIssuesConsole({ initialIssues }: { initialIssues: IssueItem
                 type="button"
                 disabled={busyId === issue.id}
                 onClick={() => resolve(issue.id, "EXPIRE_DEAL")}
-                className="h-9 rounded-sm border border-outline bg-surface px-3 text-xs font-semibold text-on-surface-variant hover:bg-surface-variant"
+                className="h-9 rounded-sm border border-outline bg-surface px-3 text-xs font-semibold text-on-surface-variant hover:bg-surface-variant disabled:opacity-60"
               >
-                딜 마감 처리
+                {busyId === issue.id ? "처리 중..." : "딜 마감 처리"}
               </button>
               <button
                 type="button"
                 disabled={busyId === issue.id}
                 onClick={() => resolve(issue.id, "RESOLVE")}
-                className="h-9 rounded-sm bg-secondary px-4 text-xs font-semibold text-on-secondary hover:bg-secondary-hover"
+                className="h-9 rounded-sm bg-secondary px-4 text-xs font-semibold text-on-secondary hover:bg-secondary-hover disabled:opacity-60"
               >
-                확인 완료
+                {busyId === issue.id ? "처리 중..." : "확인 완료"}
               </button>
             </div>
           </div>

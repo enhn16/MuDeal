@@ -16,12 +16,17 @@ const STATUTORY_DISCOUNT_KEYWORDS = [
   "경로우대",
   "경로할인",
   "경로 할인",
+  "시니어",
+  "실버",
+  "어르신",
   "보훈",
   "의사상자",
   "임산부",
   "다자녀",
+  "다둥이",
   "문화누리",
   "기초생활",
+  "수급자",
   "차상위",
 ];
 
@@ -58,12 +63,19 @@ const SPECIAL_PROMO_KEYWORDS = [
   "예스특가",
 ];
 
-const EVENT_OR_PERK_TYPES = new Set<DealType>(["PERK_GOODS", "SINGALONG", "CURTAIN_CALL", "LOTTERY"]);
+const EVENT_OR_PERK_TYPES = new Set<DealType>([
+  "PERK_GOODS",
+  "SINGALONG",
+  "CURTAIN_CALL",
+  "LOTTERY",
+  "SPECIAL_DAY",
+]);
 
 /** Returns true if a discount label refers to statutory/welfare discounts (always excluded from MuDeal). */
 export function isStatutoryDiscount(text: string | null | undefined): boolean {
   const s = (text ?? "").trim();
   if (!s) return false;
+  if (/장애(?!물)/.test(s)) return true;
   return STATUTORY_DISCOUNT_KEYWORDS.some((k) => s.includes(k));
 }
 
@@ -71,8 +83,7 @@ export function isStatutoryDiscount(text: string | null | undefined): boolean {
 export function isStatutoryOnlyDiscount(text: string | null | undefined): boolean {
   const s = (text ?? "").trim();
   if (!s) return false;
-  const hasStatutory = STATUTORY_DISCOUNT_KEYWORDS.some((k) => s.includes(k));
-  if (!hasStatutory) return false;
+  if (!isStatutoryDiscount(s)) return false;
   const lower = s.toLowerCase();
   const hasSpecial = SPECIAL_PROMO_KEYWORDS.some((k) => lower.includes(k.toLowerCase()));
   return !hasSpecial;
@@ -117,7 +128,7 @@ export function classifyDiscountLabel(rawLabel: string, extraHints: string[] = [
   if (/군인|장병|현역|국군|의무복무|경찰|소방|공무원|군무원/i.test(combined)) {
     addTag("MILITARY_PUBLIC");
   }
-  if (/청소년|학생|초중고|대학생|수험생|수험표|청년|문화패스|만\s*24세/i.test(combined)) {
+  if (/청소년|학생|초[·./\s]?중[·./\s]?고|대학생|수험생|수험표|청년|문화패스|만\s*\d+\s*세/i.test(combined)) {
     addTag("YOUTH_STUDENT");
   }
   if (/직장인|사원증|명함/i.test(combined)) {
@@ -129,14 +140,25 @@ export function classifyDiscountLabel(rawLabel: string, extraHints: string[] = [
   if (/지역|거주자|근무자|구민|시민|도민/i.test(combined)) {
     addTag("LOCAL_RESIDENT");
   }
-  if (/패키지|[2-9]\s*인\s*(?:할인|패키지|예매|관람)|커플|단체|가족\s*할인/i.test(combined)) {
+  if (
+    /패키지|1\s*\+\s*1|\d+\s*인\s*(?:이상|할인|패키지|예매|관람|권)|[2-9]\s*매\s*(?:이상|패키지|할인)|커플|단체|가족\s*할인/i.test(
+      combined,
+    )
+  ) {
     addTag("GROUP_PACKAGE");
   }
-  if (/카드|제휴|멤버십|토스페이|네이버페이|카카오페이|신한|현대|삼성|국민|우리|하나|롯데카드/i.test(combined)) {
+  const cardText = combined.replace(/포토\s*카드/gi, " ");
+  if (
+    /(?<!포토)카드|제휴|멤버십|토스페이|네이버페이|카카오페이|(?:신한|현대|삼성|국민|우리|하나|롯데|비씨|bc|nh|kb)\s*카드/i.test(
+      cardText,
+    )
+  ) {
     addTag("CARD_PARTNER");
   }
   if (
-    /드레스\s*코드|생일|SNS|팔로우|인증|소지자|증빙|지참|본인만|본인한정|확인필수/i.test(combined) &&
+    /드레스\s*코드|생일|SNS|팔로우|인증|소지자|증빙|지참|본인만|본인한정|확인필수|시야\s*제한|휠체어|평일|주중|화[·/,]?수[·/,]?목|예술인\s*패스|유료\s*회원/i.test(
+      combined,
+    ) &&
     tags.length === 0
   ) {
     addTag("EVENT_CONDITION");
@@ -177,12 +199,12 @@ export function hasMeaningfulBenefit(input: {
   conditionSummary?: string | null;
   perkSummary?: string | null;
 }): boolean {
-  if (EVENT_OR_PERK_TYPES.has(input.dealType)) {
-    return true;
-  }
-
   if (isStatutoryDiscount(input.conditionSummary)) {
     return false;
+  }
+
+  if (EVENT_OR_PERK_TYPES.has(input.dealType)) {
+    return true;
   }
 
   const effectiveRate =

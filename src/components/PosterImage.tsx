@@ -11,8 +11,9 @@ export function PosterImage({ title, posterUrl }: { title: string; posterUrl: st
         src={posterUrl}
         alt={`${title} 포스터`}
         loading="lazy"
+        referrerPolicy="no-referrer"
         onError={() => setFailed(true)}
-        className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
+        className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105 motion-reduce:transition-none motion-reduce:group-hover:scale-100"
       />
     );
   }

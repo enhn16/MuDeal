@@ -2,8 +2,18 @@ import { z } from "zod";
 import { getRuntimeDb } from "@/db/client";
 import { DEAL_TYPES, SEAT_GRADES } from "@/db/schema";
 import { AppError, jsonError } from "@/lib/errors";
+import { normalizeExpiresAtToUtcIso } from "@/lib/kst";
 import { requireRuntimeAdmin } from "@/server/modules/auth-runtime";
 import { approveUserReport } from "@/server/modules/reports";
+
+const OptionalExpiresAtSchema = z
+  .string()
+  .nullable()
+  .optional()
+  .refine(
+    (v) => v === undefined || v === null || v.trim() === "" || normalizeExpiresAtToUtcIso(v) !== null,
+    "유효한 마감 일시 형식을 입력해 주세요.",
+  );
 
 const ApproveSchema = z.object({
   showId: z.number().int().positive(),
@@ -15,6 +25,7 @@ const ApproveSchema = z.object({
   discountRate: z.number().int().min(1).max(99).nullable().optional(),
   isUnconditional: z.boolean().optional(),
   conditionSummary: z.string().trim().max(300).nullable().optional(),
+  expiresAt: OptionalExpiresAtSchema,
   maskNickname: z.boolean().optional(),
 });
 

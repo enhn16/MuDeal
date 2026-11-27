@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { AppDb } from "@/db/client";
 import {
   actors,
@@ -18,7 +18,38 @@ import {
 import { AppError } from "@/lib/errors";
 import { calcDiscountRate } from "@/lib/pricing";
 import { parseSafeExternalUrl } from "@/lib/url";
-import { recomputeShowPriceCache, writeAuditLog } from "./reports";
+import { normalizeOptionalExpiresAt, recomputeShowPriceCache, writeAuditLog } from "./reports";
+
+/** Allow only safe single-slash internal paths or https:// URLs for curation linkUrl. */
+export function validateCurationLinkUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed || /[\s\u0000-\u001F\u007F]/.test(trimmed)) {
+    throw new AppError("VALIDATION_ERROR", "유효한 내부 경로(/) 또는 https:// 링크를 입력해 주세요.");
+  }
+  if (trimmed.startsWith("/")) {
+    if (trimmed.startsWith("//") || trimmed.includes("\\")) {
+      throw new AppError("VALIDATION_ERROR", "유효한 내부 경로(/) 또는 https:// 링크를 입력해 주세요.");
+    }
+    return trimmed;
+  }
+  const safe = parseSafeExternalUrl(trimmed, { allowHttp: false });
+  if (!safe) {
+    throw new AppError("VALIDATION_ERROR", "유효한 내부 경로(/) 또는 https:// 링크를 입력해 주세요.");
+  }
+  return safe;
+}
+
+/** Allow only safe https:// URLs for curation imageUrl (blocks javascript:/data:/http:). */
+export function validateCurationImageUrl(raw: string | null | undefined): string | null {
+  if (raw === undefined || raw === null) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const safe = parseSafeExternalUrl(trimmed, { allowHttp: false });
+  if (!safe) {
+    throw new AppError("VALIDATION_ERROR", "이미지 URL은 유효한 https:// 주소만 입력할 수 있습니다.");
+  }
+  return safe;
+}
 
 export async function getAdminSidebarCounts(db: AppDb) {
   const [[pendingReports], [draftDeals], [openIssues]] = await Promise.all([
@@ -49,6 +80,8 @@ export async function listAdminReviewQueue(db: AppDb) {
         ocrConfidence: ocrImageJobs.confidence,
         ocrExtractedJson: ocrImageJobs.extractedJson,
         ocrSourceChannel: ocrImageJobs.sourceChannel,
+        ocrImageUrl: ocrImageJobs.imageUrl,
+        ocrSourcePageUrl: ocrImageJobs.sourcePageUrl,
       })
       .from(deals)
       .leftJoin(shows, eq(deals.showId, shows.id))
@@ -63,9 +96,9 @@ export async function listAdminReviewQueue(db: AppDb) {
     db
       .select()
       .from(ocrImageJobs)
-      .where(eq(ocrImageJobs.ocrStatus, "FAILED"))
+      .where(inArray(ocrImageJobs.ocrStatus, ["FAILED", "NEEDS_REVIEW"]))
       .orderBy(desc(ocrImageJobs.updatedAt))
-      .limit(15),
+      .limit(20),
   ]);
 
   return { reports, drafts, showOptions, failedOcrJobs };
@@ -118,6 +151,7 @@ export async function createAdminDeal(
 ) {
   const safeUrl = parseSafeExternalUrl(input.externalUrl, { allowHttp: true });
   if (!safeUrl) throw new AppError("VALIDATION_ERROR", "유효한 외부 URL을 입력해 주세요.");
+  const normalizedExpiresAt = normalizeOptionalExpiresAt(input.expiresAt);
 
   const [show] = await db.select({ id: shows.id }).from(shows).where(eq(shows.id, input.showId)).limit(1);
   if (!show) throw new AppError("NOT_FOUND", "대상 작품을 찾을 수 없습니다.");
@@ -138,7 +172,7 @@ export async function createAdminDeal(
       perkSummary: input.perkSummary?.trim() || null,
       eventDatesJson: input.eventDates?.length ? JSON.stringify(input.eventDates) : null,
       externalUrl: safeUrl,
-      expiresAt: input.expiresAt || null,
+      expiresAt: normalizedExpiresAt,
       status: "ACTIVE",
       sourceType: "ADMIN",
       adminLocked: input.adminLocked ? 1 : 0,
@@ -160,14 +194,40 @@ export async function updateAdminDeal(
     status?: "ACTIVE" | "EXPIRED" | "HIDDEN";
     adminLocked?: boolean;
     conditionSummary?: string | null;
+    expiresAt?: string | null;
   },
 ) {
   const [existing] = await db.select().from(deals).where(eq(deals.id, dealId)).limit(1);
   if (!existing) throw new AppError("NOT_FOUND", "딜을 찾을 수 없습니다.");
 
+  const nextExpiresAt =
+    patch.expiresAt !== undefined
+      ? normalizeOptionalExpiresAt(patch.expiresAt)
+      : existing.expiresAt;
+
+  const priceChanged = patch.basePrice !== undefined || patch.salePrice !== undefined;
   const nextBase = patch.basePrice !== undefined ? patch.basePrice : existing.basePrice;
   const nextSale = patch.salePrice !== undefined ? patch.salePrice : existing.salePrice;
-  const nextRate = calcDiscountRate(nextBase, nextSale);
+  const nextRate =
+    priceChanged && nextBase !== null && nextBase > 0
+      ? calcDiscountRate(nextBase, nextSale)
+      : existing.discountRate;
+
+  const contentModified =
+    patch.basePrice !== undefined ||
+    patch.salePrice !== undefined ||
+    patch.status !== undefined ||
+    patch.conditionSummary !== undefined ||
+    patch.expiresAt !== undefined;
+  const nextAdminLocked =
+    patch.adminLocked !== undefined
+      ? patch.adminLocked
+        ? 1
+        : 0
+      : contentModified
+        ? 1
+        : existing.adminLocked;
+
   const nowIso = new Date().toISOString();
 
   const [updated] = await db
@@ -177,9 +237,10 @@ export async function updateAdminDeal(
       salePrice: nextSale,
       discountRate: nextRate,
       status: patch.status ?? existing.status,
-      adminLocked: patch.adminLocked !== undefined ? (patch.adminLocked ? 1 : 0) : existing.adminLocked,
+      adminLocked: nextAdminLocked,
       conditionSummary:
         patch.conditionSummary !== undefined ? patch.conditionSummary : existing.conditionSummary,
+      expiresAt: nextExpiresAt,
       updatedAt: nowIso,
     })
     .where(eq(deals.id, dealId))
@@ -258,6 +319,21 @@ export async function submitDealIssue(
   const [deal] = await db.select({ id: deals.id }).from(deals).where(eq(deals.id, dealId)).limit(1);
   if (!deal) throw new AppError("NOT_FOUND", "신고 대상 딜을 찾을 수 없습니다.");
 
+  const [existingOpen] = await db
+    .select({ id: dealIssues.id })
+    .from(dealIssues)
+    .where(
+      and(
+        eq(dealIssues.dealId, dealId),
+        eq(dealIssues.reporterId, userId),
+        eq(dealIssues.status, "OPEN"),
+      ),
+    )
+    .limit(1);
+  if (existingOpen) {
+    throw new AppError("CONFLICT", "이미 동일한 딜에 대해 처리 대기 중인 오류 신고가 있습니다.");
+  }
+
   const [created] = await db
     .insert(dealIssues)
     .values({
@@ -299,20 +375,25 @@ export async function resolveAdminIssue(
   if (!issue) throw new AppError("NOT_FOUND", "오류 신고를 찾을 수 없습니다.");
 
   const nowIso = new Date().toISOString();
+  const nextStatus = action === "DISMISS" ? "DISMISSED" : "RESOLVED";
+  const claimed = await db
+    .update(dealIssues)
+    .set({ status: nextStatus, resolvedBy: adminId, resolvedAt: nowIso, updatedAt: nowIso })
+    .where(and(eq(dealIssues.id, issueId), eq(dealIssues.status, "OPEN")))
+    .returning({ id: dealIssues.id });
+
+  if (claimed.length === 0) {
+    throw new AppError("CONFLICT", "이미 처리가 완료된 오류 신고입니다.");
+  }
+
   if (action === "EXPIRE_DEAL") {
     const [deal] = await db
       .update(deals)
-      .set({ status: "EXPIRED", updatedAt: nowIso })
+      .set({ status: "EXPIRED", adminLocked: 1, updatedAt: nowIso })
       .where(eq(deals.id, issue.dealId))
       .returning({ showId: deals.showId });
     if (deal?.showId) await recomputeShowPriceCache(db, deal.showId);
   }
-
-  const nextStatus = action === "DISMISS" ? "DISMISSED" : "RESOLVED";
-  await db
-    .update(dealIssues)
-    .set({ status: nextStatus, resolvedBy: adminId, resolvedAt: nowIso, updatedAt: nowIso })
-    .where(eq(dealIssues.id, issueId));
 
   await writeAuditLog(db, adminId, `ISSUE_${action}`, "deal_issue", issueId, { dealId: issue.dealId });
   return { issueId, status: nextStatus };

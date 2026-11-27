@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildAutoCalendarEvents, withdrawUserAccount } from "@/server/modules/personal";
+import {
+  addActorFollow,
+  buildAutoCalendarEvents,
+  chunkArray,
+  removeActorFollow,
+  withdrawUserAccount,
+} from "@/server/modules/personal";
 
 describe("personal calendar auto-event extraction", () => {
   it("extracts LOTTERY and CURTAIN_CALL dates within KST range", () => {
@@ -66,18 +72,23 @@ describe("personal calendar auto-event extraction", () => {
           where: async () => {
             selectStep += 1;
             if (selectStep === 1) return [{ actorId: 1 }]; // followed actors
-            return [{ id: 10 }]; // user reports
+            return [{ id: 10, evidenceR2Key: "reports/42/123-abcd.png" }]; // user reports
           },
         }),
       }),
       delete: () => ({ where: deleteCalls }),
     } as unknown as Parameters<typeof withdrawUserAccount>[0];
 
-    await withdrawUserAccount(mockDb, 42, new Date("2026-11-26T00:00:00.000Z"));
+    const bucketDelete = vi.fn(async () => undefined);
+    await withdrawUserAccount(mockDb, 42, new Date("2026-11-26T00:00:00.000Z"), {
+      evidenceBucket: { delete: bucketDelete },
+    });
 
-    expect(deleteCalls).toHaveBeenCalledTimes(5);
+    // 5 personal tables + dealHelpfulVotes
+    expect(deleteCalls).toHaveBeenCalledTimes(6);
+    expect(bucketDelete).toHaveBeenCalledWith("reports/42/123-abcd.png");
     expect(updateCalls.some((u) => "revokedAt" in u)).toBe(true);
-    expect(updateCalls.some((u) => u.reporterNickname === "익명의 관객")).toBe(true);
+    expect(updateCalls.some((u) => u.reporterNickname === "익명의 관객" && u.evidenceR2Key === null)).toBe(true);
     expect(
       updateCalls.some(
         (u) =>
@@ -87,5 +98,57 @@ describe("personal calendar auto-event extraction", () => {
           u.oauthSubject.startsWith("withdrawn:42:"),
       ),
     ).toBe(true);
+  });
+
+  it("ignores invalid expiresAt in buildAutoCalendarEvents without throwing and chunks large ID arrays", () => {
+    const events = buildAutoCalendarEvents(
+      [
+        {
+          showTitle: "뮤지컬 <알라딘>",
+          deal: {
+            id: 99,
+            showId: 1,
+            channelName: "NOL티켓",
+            dealType: "LOTTERY",
+            opensAt: null,
+            expiresAt: "내일까지",
+            eventDatesJson: null,
+            conditionSummary: null,
+            perkSummary: null,
+          },
+        },
+      ],
+      "2026-11-01",
+      "2026-11-30",
+    );
+    expect(events).toEqual([]);
+    expect(chunkArray(Array.from({ length: 120 }, (_, i) => i), 50).map((c) => c.length)).toEqual([50, 50, 20]);
+  });
+
+  it("only updates followerCount when follow insert/delete actually affects a row", async () => {
+    let updateCount = 0;
+    const conflictFollowDb = {
+      select: () => ({
+        from: () => ({
+          where: () => ({ limit: async () => [{ id: 1 }] }),
+        }),
+      }),
+      insert: () => ({
+        values: () => ({
+          onConflictDoNothing: () => ({ returning: async () => [] }),
+        }),
+      }),
+      delete: () => ({
+        where: () => ({ returning: async () => [] }),
+      }),
+      update: () => {
+        updateCount += 1;
+        return { set: () => ({ where: async () => undefined }) };
+      },
+    } as unknown as Parameters<typeof addActorFollow>[0];
+
+    await addActorFollow(conflictFollowDb, 2, 1);
+    await removeActorFollow(conflictFollowDb, 2, 1);
+    expect(updateCount).toBe(0);
   });
 });

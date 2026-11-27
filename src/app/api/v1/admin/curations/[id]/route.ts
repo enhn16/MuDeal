@@ -3,12 +3,14 @@ import { z } from "zod";
 import { getRuntimeDb } from "@/db/client";
 import { homeCurations } from "@/db/schema";
 import { AppError, jsonError } from "@/lib/errors";
+import { validateCurationImageUrl, validateCurationLinkUrl } from "@/server/modules/admin";
 import { requireRuntimeAdmin } from "@/server/modules/auth-runtime";
 import { writeAuditLog } from "@/server/modules/reports";
 
 const PatchCurationSchema = z.object({
   title: z.string().trim().min(1).max(80).optional(),
   subtitle: z.string().trim().max(120).nullable().optional(),
+  imageUrl: z.string().trim().max(500).nullable().optional(),
   linkUrl: z.string().trim().min(1).max(300).optional(),
   sortOrder: z.number().int().min(0).optional(),
   isActive: z.boolean().optional(),
@@ -26,13 +28,18 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     const id = parseId((await ctx.params).id);
     const parsed = PatchCurationSchema.safeParse(await req.json().catch(() => null));
     if (!parsed.success) throw new AppError("VALIDATION_ERROR", "수정값을 확인해 주세요.");
+    const safeLinkUrl =
+      parsed.data.linkUrl !== undefined ? validateCurationLinkUrl(parsed.data.linkUrl) : undefined;
+    const safeImageUrl =
+      parsed.data.imageUrl !== undefined ? validateCurationImageUrl(parsed.data.imageUrl) : undefined;
     const db = getRuntimeDb();
     const updated = await db
       .update(homeCurations)
       .set({
         ...(parsed.data.title !== undefined ? { title: parsed.data.title } : {}),
         ...(parsed.data.subtitle !== undefined ? { subtitle: parsed.data.subtitle } : {}),
-        ...(parsed.data.linkUrl !== undefined ? { linkUrl: parsed.data.linkUrl } : {}),
+        ...(safeImageUrl !== undefined ? { imageUrl: safeImageUrl } : {}),
+        ...(safeLinkUrl !== undefined ? { linkUrl: safeLinkUrl } : {}),
         ...(parsed.data.sortOrder !== undefined ? { sortOrder: parsed.data.sortOrder } : {}),
         ...(parsed.data.isActive !== undefined ? { isActive: parsed.data.isActive ? 1 : 0 } : {}),
         updatedAt: new Date().toISOString(),

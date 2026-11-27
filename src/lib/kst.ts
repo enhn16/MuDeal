@@ -5,8 +5,9 @@ function toKstShifted(now: Date): Date {
   return new Date(now.getTime() + KST_OFFSET_MS);
 }
 
-/** Format a Date as KST YYYY-MM-DD. */
+/** Format a Date as KST YYYY-MM-DD (returns "" on invalid Date without throwing). */
 export function formatKstDate(now = new Date()): string {
+  if (Number.isNaN(now.getTime())) return "";
   return toKstShifted(now).toISOString().slice(0, 10);
 }
 
@@ -27,23 +28,82 @@ export function formatKstDateTime(value: string | Date): string {
 
 /** UTC ISO string for 00:00:00 KST of the given instant (daily limit reset boundary). */
 export function startOfKstDayUtc(now = new Date()): string {
-  const kstDate = formatKstDate(now);
+  const safeNow = Number.isNaN(now.getTime()) ? new Date() : now;
+  const kstDate = formatKstDate(safeNow);
   return new Date(`${kstDate}T00:00:00+09:00`).toISOString();
+}
+
+/**
+ * Strictly validate & normalize a date/datetime string into a UTC ISO string.
+ * - `YYYY-MM-DD` -> KST 23:59:59+09:00 -> UTC ISO
+ * - `YYYY-MM-DD[T ]HH:MM(:SS)?(.sss)?(Z|[+-]HH:MM)?` -> validates calendar date & 00..23:00..59:00..59, defaults tz to +09:00.
+ * - Invalid strings (e.g. "2026-12-01T24:00:00", "2026-02-30", "내일까지") -> null.
+ */
+export function normalizeExpiresAtToUtcIso(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    if (!isValidIsoDate(trimmed)) return null;
+    const dt = new Date(`${trimmed}T23:59:59+09:00`);
+    return Number.isNaN(dt.getTime()) ? null : dt.toISOString();
+  }
+
+  const m =
+    /^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})?$/i.exec(trimmed);
+  if (!m) return null;
+
+  const [, datePart, hhStr, mmStr, ssStr = "00", frac = "", tzRaw] = m;
+  if (!isValidIsoDate(datePart)) return null;
+
+  const hh = Number(hhStr);
+  const mm = Number(mmStr);
+  const ss = Number(ssStr);
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59 || ss < 0 || ss > 59) return null;
+
+  let tz = tzRaw ? tzRaw.toUpperCase() : "+09:00";
+  if (tz !== "Z") {
+    const tzm = /^([+-])(\d{2}):(\d{2})$/.exec(tz);
+    if (!tzm) return null;
+    const tzH = Number(tzm[2]);
+    const tzM = Number(tzm[3]);
+    if (tzH > 14 || tzM > 59) return null;
+    tz = `${tzm[1]}${tzm[2]}:${tzm[3]}`;
+  }
+
+  const dt = new Date(`${datePart}T${hhStr}:${mmStr}:${ssStr}${frac}${tz}`);
+  return Number.isNaN(dt.getTime()) ? null : dt.toISOString();
 }
 
 /** BP-RESET-001-3: expired once nowUtc >= expiresAt (inclusive at the exact boundary). */
 export function isExpired(expiresAt: string | null | undefined, now = new Date()): boolean {
   if (!expiresAt) return false;
-  return now.getTime() >= Date.parse(expiresAt);
+  const nowMs = now.getTime();
+  if (Number.isNaN(nowMs)) return false;
+  const normalized = normalizeExpiresAtToUtcIso(expiresAt);
+  const expMs = normalized ? Date.parse(normalized) : Date.parse(expiresAt);
+  if (Number.isNaN(expMs)) return false;
+  return nowMs >= expMs;
 }
 
-/** KST calendar day difference until target ISO/YYYY-MM-DD (0 = D-Day, < 0 = ended). */
+/** KST calendar day difference until target ISO/YYYY-MM-DD (0 = D-Day, < 0 = ended, NaN on invalid input). */
 export function calcKstDDay(target: string, now = new Date()): number {
-  const todayUtc = Date.parse(`${formatKstDate(now)}T00:00:00Z`);
-  const targetKstDate = /^\d{4}-\d{2}-\d{2}$/.test(target)
-    ? target
-    : formatKstDate(new Date(target));
+  const todayKst = formatKstDate(now);
+  if (!todayKst) return Number.NaN;
+  const todayUtc = Date.parse(`${todayKst}T00:00:00Z`);
+  let targetKstDate = "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(target)) {
+    if (!isValidIsoDate(target)) return Number.NaN;
+    targetKstDate = target;
+  } else {
+    const dt = new Date(target);
+    if (Number.isNaN(dt.getTime())) return Number.NaN;
+    targetKstDate = formatKstDate(dt);
+  }
+  if (!targetKstDate) return Number.NaN;
   const targetUtc = Date.parse(`${targetKstDate}T00:00:00Z`);
+  if (Number.isNaN(targetUtc)) return Number.NaN;
   return Math.round((targetUtc - todayUtc) / DAY_MS);
 }
 
@@ -203,59 +263,90 @@ export function extractDatesFromKoreanText(text: string | null | undefined, refY
     for (const d of expandDateRange(start, end)) found.add(d);
   };
 
+  let masked = text;
+  const maskSpan = (src: string, start: number, len: number) =>
+    src.slice(0, start) + " ".repeat(len) + src.slice(start + len);
+
   // 1. Ranges with Korean month/day: "2026년 11월 24일 ~ 12월 1일", "11월 24일~29일"
   const krRangeRe =
-    /(?:(20\d{2})\s*년\s*)?(\d{1,2})\s*월\s*(\d{1,2})\s*일(?:\s*\([월화수목금토일]\))?\s*[~～\-]\s*(?:(20\d{2})\s*년\s*)?(?:(\d{1,2})\s*월\s*)?(\d{1,2})\s*일/g;
-  for (const m of text.matchAll(krRangeRe)) {
+    /(?:(20\d{2})\s*년\s*)?(\d{1,2})\s*월\s*(\d{1,2})\s*일(?:\s*\([월화수목금토일]\))?\s*[~～\-]\s*(?:(20\d{2})\s*년\s*)?(?:(\d{1,2})\s*월\s*)?(\d{1,2})\s*일(?:\s*\([월화수목금토일]\))?/g;
+  for (const m of masked.matchAll(krRangeRe)) {
     const y1 = m[1] ? Number(m[1]) : refYear;
     addRange(y1, Number(m[2]), Number(m[3]), m[4] ? Number(m[4]) : null, m[5] ? Number(m[5]) : null, Number(m[6]));
+    if (m.index !== undefined) masked = maskSpan(masked, m.index, m[0].length);
   }
 
   // 2. Ranges with numeric separators: "2026.11.24 ~ 2026.11.29", "11/24(화)~11/29(일)", "11.24~29"
   const numRangeRe =
-    /(?:(20\d{2})[./-])?(\d{1,2})[./-](\d{1,2})(?:\s*\([월화수목금토일]\))?\s*[~～\-]\s*(?:(20\d{2})[./-])?(?:(\d{1,2})[./-])?(\d{1,2})(?!\d)/g;
-  for (const m of text.matchAll(numRangeRe)) {
+    /(?:^|[^\d./-])(?:(20\d{2})[./-])?(\d{1,2})([./-])(\d{1,2})(?:\s*\([월화수목금토일]\))?(\s*[~～\-]\s*)(?:(20\d{2})[./-])?(?:(\d{1,2})[./-])?(\d{1,2})(?:\s*\([월화수목금토일]\))?(?![\d./-])/g;
+  for (const m of masked.matchAll(numRangeRe)) {
+    const full = m[0];
+    const hasPrefixChar = m.index !== undefined && !/^\d/.test(full);
+    const spanStart = (m.index ?? 0) + (hasPrefixChar ? 1 : 0);
+    const spanLen = full.length - (hasPrefixChar ? 1 : 0);
     const y1 = m[1] ? Number(m[1]) : refYear;
     const m1 = Number(m[2]);
-    const d1 = Number(m[3]);
-    const m2 = m[5] ? Number(m[5]) : null;
-    const d2 = Number(m[6]);
+    const dSep = m[3];
+    const d1 = Number(m[4]);
+    const rangeSep = m[5];
+    const y2 = m[6] ? Number(m[6]) : null;
+    const m2 = m[7] ? Number(m[7]) : null;
+    const d2 = Number(m[8]);
+    const after = masked.slice((m.index ?? 0) + full.length);
+
+    // Block non-date numeric chains like "1-2-3차" and decimals/units like "1.5~2시간"
+    if (!m[1] && dSep === "-" && rangeSep === "-") continue;
+    if (m2 === null && d2 < d1) continue;
+    if (!m[1] && /^\s*(?:시간|분|초|차|급|층|관|분기|배|점|세|개월|%|원|km|cm|mm)/i.test(after)) continue;
+
     if (m1 >= 1 && m1 <= 12 && d1 >= 1 && d1 <= 31 && d2 >= 1 && d2 <= 31) {
-      addRange(y1, m1, d1, m[4] ? Number(m[4]) : null, m2, d2);
+      addRange(y1, m1, d1, y2, m2, d2);
+      masked = maskSpan(masked, spanStart, spanLen);
     }
   }
 
   // 3. Same-month comma/dot lists: "11월 28일, 29일", "11월 24일·25일"
   const krListRe =
     /(?:(20\d{2})\s*년\s*)?(\d{1,2})\s*월\s*(\d{1,2})\s*일(?:\s*\([월화수목금토일]\))?(?:\s*[,·/]\s*(\d{1,2})\s*일(?:\s*\([월화수목금토일]\))?)+/g;
-  for (const m of text.matchAll(krListRe)) {
+  for (const m of masked.matchAll(krListRe)) {
     const y = m[1] ? Number(m[1]) : refYear;
     const mo = Number(m[2]);
     for (const dm of m[0].matchAll(/(\d{1,2})\s*일/g)) {
       const iso = makeIsoDate(y, mo, Number(dm[1]));
       if (iso) found.add(iso);
     }
+    if (m.index !== undefined) masked = maskSpan(masked, m.index, m[0].length);
   }
 
   // 4. Single Korean dates: "2026년 12월 1일", "12월 1일"
   const krSingleRe = /(?:(20\d{2})\s*년\s*)?(\d{1,2})\s*월\s*(\d{1,2})\s*일/g;
-  for (const m of text.matchAll(krSingleRe)) {
+  for (const m of masked.matchAll(krSingleRe)) {
     const iso = makeIsoDate(m[1] ? Number(m[1]) : refYear, Number(m[2]), Number(m[3]));
     if (iso) found.add(iso);
+    if (m.index !== undefined) masked = maskSpan(masked, m.index, m[0].length);
   }
 
   // 5. Full ISO/dotted dates: "2026-12-01", "2026.12.01", "2026/12/01"
   const fullNumRe = /(20\d{2})[./-](\d{1,2})[./-](\d{1,2})(?!\d)/g;
-  for (const m of text.matchAll(fullNumRe)) {
+  for (const m of masked.matchAll(fullNumRe)) {
     const iso = makeIsoDate(Number(m[1]), Number(m[2]), Number(m[3]));
     if (iso) found.add(iso);
+    if (m.index !== undefined) masked = maskSpan(masked, m.index, m[0].length);
   }
 
-  // 6. Explicit M/D or M.D(요일) tokens: "11/29", "12.01(화)"
-  const mdRe = /(?:^|[^\d./-])(\d{1,2})(?:\/(\d{1,2})|\.(\d{1,2})\s*\([월화수목금토일]\))(?!\d)/g;
-  for (const m of text.matchAll(mdRe)) {
+  // 6. Explicit M/D or M.D(요일) tokens: "11/29", "12.01(화)" (blocks fractions like "1/2 가격", "3/4분기")
+  const mdRe = /(?:^|[^\d./-])(\d{1,2})(?:\/(\d{1,2})|\.(\d{1,2})\s*\([월화수목금토일]\))(?![\d./-])/g;
+  for (const m of masked.matchAll(mdRe)) {
     const mo = Number(m[1]);
+    const hasDow = m[3] !== undefined;
     const day = Number(m[2] ?? m[3]);
+    const after = masked.slice((m.index ?? 0) + m[0].length);
+    if (!hasDow) {
+      if (/^\s*(?:가격|분기|배|시간|차|급|층|관|세|개월|%|원)/i.test(after)) continue;
+      if (/^(?:1\/2|1\/3|1\/4|2\/3|3\/4)$/.test(`${mo}/${day}`) && /^\s*(?:할인|가|이상|이하|수준)/.test(after)) {
+        continue;
+      }
+    }
     const iso = makeIsoDate(refYear, mo, day);
     if (iso) found.add(iso);
   }
@@ -268,7 +359,7 @@ function shiftIsoDateDays(isoDate: string, days: number): string {
 }
 
 /**
- * Normalize OCR/text event dates and correct hallucinated past years (e.g. 2021/2023/2024)
+ * Normalize OCR/text event dates and correct hallucinated past/sentinel years (e.g. 2021/2023/2099)
  * using the show's actual run period or the current KST year.
  */
 export function normalizeEventDates(
@@ -281,8 +372,9 @@ export function normalizeEventDates(
   } = {},
 ): string[] {
   const now = opts.now ?? new Date();
-  const todayKst = formatKstDate(now);
+  const todayKst = formatKstDate(now) || formatKstDate(new Date());
   const currentYear = Number(todayKst.slice(0, 4));
+  const todayMs = Date.parse(`${todayKst}T00:00:00Z`);
 
   const validRaw = (rawDates ?? []).map((d) => d.trim()).filter(isValidIsoDate);
   const refYear =
@@ -307,21 +399,36 @@ export function normalizeEventDates(
     const year = Number(iso.slice(0, 4));
     const md = iso.slice(5); // MM-DD
 
+    // Drop open-run sentinel / wildly hallucinated far-future years (e.g. 2099-12-31)
+    if (year >= 2090 || year > currentYear + 5) {
+      continue;
+    }
+
     if (hasBoundedPeriod && graceStart && graceEnd) {
       if (iso >= graceStart && iso <= graceEnd) {
         normalized.add(iso);
         continue;
       }
-      // Try remapping MM-DD into the show's running year(s)
-      let mapped: string | null = null;
+      // Try remapping MM-DD into the show's running year(s), picking the valid year closest to `now`
+      const candidates: string[] = [];
       for (let y = minShowYear; y <= maxShowYear; y++) {
         const candidate = `${y}-${md}`;
         if (isValidIsoDate(candidate) && candidate >= graceStart && candidate <= graceEnd) {
-          mapped = candidate;
-          break;
+          candidates.push(candidate);
         }
       }
-      normalized.add(mapped ?? iso);
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => {
+          const da = Date.parse(`${a}T00:00:00Z`) - todayMs;
+          const db = Date.parse(`${b}T00:00:00Z`) - todayMs;
+          const absDiff = Math.abs(da) - Math.abs(db);
+          if (absDiff !== 0) return absDiff;
+          return db - da; // prefer upcoming/current on exact tie
+        });
+        normalized.add(candidates[0]);
+      } else if (year >= minShowYear - 1 && year <= maxShowYear + 1) {
+        normalized.add(iso);
+      }
       continue;
     }
 
@@ -330,9 +437,7 @@ export function normalizeEventDates(
       const thisYear = `${currentYear}-${md}`;
       const nextYear = `${currentYear + 1}-${md}`;
       if (isValidIsoDate(thisYear)) {
-        const diffDays = Math.round(
-          (Date.parse(`${thisYear}T00:00:00Z`) - Date.parse(`${todayKst}T00:00:00Z`)) / DAY_MS,
-        );
+        const diffDays = Math.round((Date.parse(`${thisYear}T00:00:00Z`) - todayMs) / DAY_MS);
         normalized.add(diffDays < -180 && isValidIsoDate(nextYear) ? nextYear : thisYear);
         continue;
       }
@@ -401,6 +506,21 @@ export function compareDatedBenefitPriority(
   return ra.primary.localeCompare(rb.primary) || ra.secondary.localeCompare(rb.secondary);
 }
 
+function resolveBookingDatesNearNow(dates: string[], todayKst: string, hasExplicitYear: boolean): string[] {
+  const todayMs = Date.parse(`${todayKst}T00:00:00Z`);
+  return dates
+    .map((iso) => {
+      if (hasExplicitYear) return iso;
+      const diffDays = Math.round((Date.parse(`${iso}T00:00:00Z`) - todayMs) / DAY_MS);
+      if (diffDays < -60) {
+        const next = `${Number(iso.slice(0, 4)) + 1}-${iso.slice(5)}`;
+        if (isValidIsoDate(next)) return next;
+      }
+      return iso;
+    })
+    .filter((d) => isValidIsoDate(d) && Number(d.slice(0, 4)) < 2090);
+}
+
 /**
  * Extract booking deadline (`bookingExpiresAt`) and applicable performance dates (`applicableDates`)
  * from Korean discount labels like:
@@ -414,7 +534,8 @@ export function extractDiscountDatesFromLabel(
 ): { bookingExpiresAt: string | null; applicableDates: string[] } {
   if (!label) return { bookingExpiresAt: null, applicableDates: [] };
   const now = opts.now ?? new Date();
-  const refYear = Number(formatKstDate(now).slice(0, 4));
+  const todayKst = formatKstDate(now) || formatKstDate(new Date());
+  const refYear = Number(todayKst.slice(0, 4));
   // Strip age/birth/year-only noise like "1959년이전출생", "2027수험표", "36개월~만18세", "1인2매"
   const cleaned = label
     .replace(/\d{4}\s*년\s*이전\s*출생/g, " ")
@@ -427,23 +548,39 @@ export function extractDiscountDatesFromLabel(
   let remainingForPerf = cleaned;
 
   // 1. Booking deadline clauses: "(~12/1까지 예매시)", "(~12/17)", "11월 11일부터 12월 23일까지 예매 시"
-  const bookingClausePatterns = [
-    /(?:(?:20\d{2}\s*년\s*)?\d{1,2}\s*월\s*\d{1,2}\s*일\s*부터\s*|(?:20\d{2}[./-])?\d{1,2}[./-]\d{1,2}\s*[~～]\s*|~|～)[^,()]{0,28}?(?:까지\s*예매[^,()]*|까지(?=\s*[),]|$))/g,
+  const explicitBookingClauseRe =
+    /(?:(?:20\d{2}\s*년\s*)?\d{1,2}\s*월\s*\d{1,2}\s*일\s*(?:부터|[~～])\s*|(?:20\d{2}[./-])?\d{1,2}[./-]\d{1,2}\s*[~～]\s*|~|～)[^,()]{0,28}?(?:까지\s*예매[^,()]*|까지(?=\s*[),]|$))/g;
+  const standaloneTildePatterns = [
     /(?:~|～)\s*(?:20\d{2}[./-])?\d{1,2}[./-]\d{1,2}(?:\s*\([월화수목금토일]\))?(?:\s*까지)?/g,
-    /(?:~|～)\s*(?:20\d{2}\s*년\s*)?\d{1,2}\s*월\s*\d{1,2}\s*일(?:\s*까지)?/g,
+    /(?:~|～)\s*(?:20\d{2}\s*년\s*)?\d{1,2}\s*월\s*\d{1,2}\s*일(?:\s*\([월화수목금토일]\))?(?:\s*까지)?/g,
   ];
+  const precedesDateTokenRe = /(?:\d{1,2}\s*일|\d{1,2}[./-]\d{1,2})(?:\s*\([월화수목금토일]\))?\s*$/;
 
   const bookingDatesFound: string[] = [];
-  for (const re of bookingClausePatterns) {
-    for (const m of cleaned.matchAll(re)) {
+
+  for (const m of remainingForPerf.matchAll(explicitBookingClauseRe)) {
+    const snippet = m[0];
+    if (/회차|공연|관람/.test(snippet) && !/예매/.test(snippet)) continue;
+    const rawDates = extractDatesFromKoreanText(snippet, refYear);
+    const dates = resolveBookingDatesNearNow(rawDates, todayKst, /20\d{2}/.test(snippet));
+    if (dates.length > 0) {
+      bookingDatesFound.push(...dates);
+      remainingForPerf = remainingForPerf.replace(snippet, " ");
+    }
+  }
+
+  for (const re of standaloneTildePatterns) {
+    const snapshot = remainingForPerf;
+    for (const m of snapshot.matchAll(re)) {
       const snippet = m[0];
-      // Skip if this snippet explicitly says 회차/공연/관람 (that's performance period, not booking deadline)
-      if (/회차|공연|관람/.test(snippet) && !/예매/.test(snippet)) continue;
-      const dates = normalizeEventDates(extractDatesFromKoreanText(snippet, refYear), {
-        showStartDate: opts.showStartDate,
-        showEndDate: opts.showEndDate,
-        now,
-      });
+      const idx = m.index ?? 0;
+      const before = snapshot.slice(0, idx);
+      const after = snapshot.slice(idx + snippet.length);
+      // Do not split bilateral ranges like "11/24~12/1 공연" or "12월 24일~12월 31일 연말 할인"
+      if (precedesDateTokenRe.test(before)) continue;
+      if (/^\s*(?:회차|공연|관람)/.test(after) && !/예매/.test(snippet)) continue;
+      const rawDates = extractDatesFromKoreanText(snippet, refYear);
+      const dates = resolveBookingDatesNearNow(rawDates, todayKst, /20\d{2}/.test(snippet));
       if (dates.length > 0) {
         bookingDatesFound.push(...dates);
         remainingForPerf = remainingForPerf.replace(snippet, " ");
@@ -453,7 +590,7 @@ export function extractDiscountDatesFromLabel(
 
   if (bookingDatesFound.length > 0) {
     const latestBooking = bookingDatesFound.sort().at(-1)!;
-    bookingExpiresAt = new Date(`${latestBooking}T23:59:59+09:00`).toISOString();
+    bookingExpiresAt = normalizeExpiresAtToUtcIso(latestBooking);
   }
 
   // 2. Applicable performance dates from remaining text (only explicit date/range mentions)

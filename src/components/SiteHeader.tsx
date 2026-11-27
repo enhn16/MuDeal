@@ -8,12 +8,16 @@ export function SiteHeader({
 }) {
   return (
     <header className="sticky top-0 z-30 border-b border-outline bg-surface shadow-e1">
-      <div className="mx-auto flex max-w-[1100px] flex-wrap items-center justify-between gap-3 px-5 py-3.5 lg:gap-4 lg:px-0">
-        <Link href="/" className="text-2xl font-bold tracking-tight text-primary">
+      <div className="mx-auto flex max-w-[1100px] flex-wrap items-center justify-between gap-2.5 px-5 py-3 sm:flex-nowrap sm:gap-3 lg:gap-4 lg:px-0">
+        <Link href="/" className="shrink-0 text-2xl font-bold tracking-tight text-primary">
           MuDeal
         </Link>
 
-        <form action="/search" method="get" className="min-w-0 flex-1 sm:max-w-md sm:min-w-60">
+        <form
+          action="/search"
+          method="get"
+          className="order-3 w-full min-w-0 sm:order-none sm:max-w-md sm:flex-1"
+        >
           <label htmlFor="global-search" className="sr-only">
             작품명, 뮤지컬 배우, 공연장 검색
           </label>
@@ -34,10 +38,11 @@ export function SiteHeader({
           </div>
         </form>
 
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
           <Link
             href="/reports/new"
-            className="inline-flex h-10 items-center gap-1 rounded-sm border border-outline bg-surface px-3 text-[13px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-variant hover:text-primary"
+            aria-label="할인 제보"
+            className="inline-flex h-10 items-center gap-1 rounded-sm border border-outline bg-surface px-2.5 text-[13px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-variant hover:text-primary sm:px-3"
           >
             <span className="material-symbols-outlined text-lg" aria-hidden="true">
               edit_note
@@ -50,7 +55,7 @@ export function SiteHeader({
               {session.user.role === "ADMIN" && (
                 <Link
                   href="/admin/reports"
-                  className="hidden h-10 items-center rounded-sm bg-curtain-noir px-3 text-[13px] font-semibold text-on-curtain-noir transition-colors hover:bg-mulberry md:inline-flex"
+                  className="inline-flex h-10 items-center rounded-sm bg-curtain-noir px-2.5 text-xs font-semibold text-on-curtain-noir transition-colors hover:bg-mulberry sm:px-3 sm:text-[13px]"
                 >
                   ADMIN
                 </Link>

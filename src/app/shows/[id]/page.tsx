@@ -25,7 +25,7 @@ export async function generateMetadata({ params }: { params: ShowRouteParams }):
   if (!Number.isInteger(showId) || showId <= 0) return { title: "작품 상세 — MuDeal" };
 
   const data = await getShowDetail(getRuntimeDb(), showId);
-  if (!data) return { title: "작품을 찾을 수 없습니다 — MuDeal" };
+  if (!data) return { title: "작품을 찾을 수 없어요 — MuDeal" };
 
   const lowest = data.summary.generalLowest ?? data.summary.conditionalLowest;
   const maxRate = data.deals.reduce<number | null>(
@@ -68,12 +68,13 @@ export default async function ShowDetailPage({ params }: { params: ShowRoutePara
   const basePriceEntries = Object.entries(data.show.basePrices);
   const todayKst = formatKstDate();
   const hasLottery = data.deals.some((d) => d.dealType === "LOTTERY");
+  const isEnded = data.show.status === "ENDED";
 
   const headerSlot = (
     <section className="rounded-lg border border-outline bg-surface p-6">
       <div className="flex flex-col gap-6 sm:flex-row">
         <div className="mx-auto w-40 shrink-0 sm:mx-0">
-          <div className="poster-frame">
+          <div className={`poster-frame relative ${isEnded ? "opacity-60 grayscale" : ""}`}>
             <PosterArtwork title={data.show.title} posterUrl={data.show.posterUrl} />
           </div>
         </div>
@@ -85,7 +86,12 @@ export default async function ShowDetailPage({ params }: { params: ShowRoutePara
                 <span className="rounded-xs bg-rose-mist px-2 py-0.5 text-xs font-semibold text-primary">
                   {SUB_REGION_LABELS[data.show.subRegion]}
                 </span>
-                {hasLottery && (
+                {isEnded && (
+                  <span className="rounded-xs bg-surface-sunken-2 px-2 py-0.5 text-xs font-semibold text-muted">
+                    공연 종료
+                  </span>
+                )}
+                {hasLottery && !isEnded && (
                   <span className="rounded-xs border border-champagne-gold bg-gold-wash px-2 py-0.5 text-xs font-semibold text-on-surface">
                     로터리 진행중
                   </span>
@@ -138,57 +144,73 @@ export default async function ShowDetailPage({ params }: { params: ShowRoutePara
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-surface-variant px-4 py-3 text-sm text-muted">
             <span>등록된 싱어롱·커튼콜·특전 이벤트가 아직 없어요.</span>
             <Link href="/reports/new" className="text-xs font-semibold text-primary hover:underline">
-              이벤트 제보하기 ↗
+              이벤트 제보하기 →
             </Link>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {data.events.map((ev) => {
-              const isPerk = ev.dealType === "PERK_GOODS";
-              const formattedDates = formatEventDates(ev.eventDates, "full");
-              const fallbackExpiry =
-                !formattedDates && ev.expiresAt
-                  ? `~${formatEventDateWithDow(formatKstDate(new Date(ev.expiresAt)))}까지`
-                  : null;
-              const dateLabel = formattedDates ?? fallbackExpiry;
-              return (
-                <div
-                  key={ev.id}
-                  className={`flex flex-col gap-2 rounded-md border border-outline p-4 ${
-                    isPerk ? "bg-gold-wash" : "bg-surface-variant"
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span
-                      className={`rounded-xs px-2 py-0.5 text-xs font-semibold ${
-                        isPerk
-                          ? "border border-champagne-gold bg-surface text-on-surface"
-                          : "bg-rose-mist text-primary"
-                      }`}
-                    >
-                      {DEAL_TYPE_LABELS[ev.dealType]}
-                    </span>
-                    <span className="text-xs text-muted">{ev.channelName}</span>
-                  </div>
-                  {dateLabel && (
-                    <p className="text-xs font-semibold text-primary tabular-nums">{dateLabel}</p>
-                  )}
-                  <h3 className="text-[15px] font-semibold text-on-surface">
-                    {ev.conditionSummary ?? DEAL_TYPE_LABELS[ev.dealType]}
-                  </h3>
-                  {ev.perkSummary && <p className="text-[13px] text-muted">{ev.perkSummary}</p>}
-                  <a
-                    href={ev.externalUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-auto pt-1 text-xs font-semibold text-primary hover:underline"
+          <>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {data.events.map((ev) => {
+                const isPerk = ev.dealType === "PERK_GOODS";
+                const evMeta = ev as typeof ev & {
+                  sourceType?: string;
+                  reporterNickname?: string | null;
+                };
+                const formattedDates = formatEventDates(ev.eventDates, "full");
+                const fallbackExpiry =
+                  !formattedDates && ev.expiresAt
+                    ? `~${formatEventDateWithDow(formatKstDate(new Date(ev.expiresAt)))}까지`
+                    : null;
+                const dateLabel = formattedDates ?? fallbackExpiry;
+                return (
+                  <div
+                    key={ev.id}
+                    className={`flex flex-col gap-2 rounded-md border border-outline p-4 ${
+                      isPerk ? "bg-gold-wash" : "bg-surface-variant"
+                    }`}
                   >
-                    {ev.channelName} 공지 원문 보기 ↗
-                  </a>
-                </div>
-              );
-            })}
-          </div>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span
+                          className={`rounded-xs px-2 py-0.5 text-xs font-semibold ${
+                            isPerk
+                              ? "border border-champagne-gold bg-surface text-on-surface"
+                              : "bg-rose-mist text-primary"
+                          }`}
+                        >
+                          {DEAL_TYPE_LABELS[ev.dealType]}
+                        </span>
+                        {evMeta.sourceType === "USER_REPORT" && (
+                          <span className="rounded-xs bg-rose-mist px-2 py-0.5 text-xs font-semibold text-primary">
+                            {evMeta.reporterNickname || "익명의 관객"}님 제보
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-xs text-muted">{ev.channelName}</span>
+                    </div>
+                    {dateLabel && (
+                      <p className="text-xs font-semibold text-primary tabular-nums">{dateLabel}</p>
+                    )}
+                    <h3 className="text-[15px] font-semibold text-on-surface">
+                      {ev.conditionSummary ?? DEAL_TYPE_LABELS[ev.dealType]}
+                    </h3>
+                    {ev.perkSummary && <p className="text-[13px] text-muted">{ev.perkSummary}</p>}
+                    <a
+                      href={ev.externalUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-auto pt-1 text-xs font-semibold text-primary hover:underline"
+                    >
+                      {ev.channelName} 공지 원문 보기 ↗
+                    </a>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-xs text-muted">
+              현장 특전 수량 및 이벤트 진행 조건은 외부 예매처·제작사 공지 기준으로 변경될 수 있어요.
+            </p>
+          </>
         )}
       </section>
 

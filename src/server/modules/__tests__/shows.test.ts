@@ -292,4 +292,88 @@ describe("4-axis show search filter", () => {
     expect(card.perkHighlight).toBe("현재 진행 중 탁상달력 특전");
     expect(card.perkDates).toEqual(["2026-11-24", "2026-11-25", "2026-11-26"]);
   });
+
+  it("excludes past-dated/future-only deals consistently, computes lowestPrice by min salePrice, and preserves SPECIAL_DAY", () => {
+    const edgeDataset = [
+      {
+        // Only has an expired-event-date perk and a future-opensAt discount -> must NOT appear in search
+        show: makeShow({ id: 50, title: "만료 이벤트/미래 오픈 전용 극" }),
+        deals: [
+          makeDeal({
+            id: 501,
+            showId: 50,
+            dealType: "PERK_GOODS",
+            salePrice: null,
+            discountRate: null,
+            expiresAt: null,
+            perkSummary: "지난주 포토카드",
+            eventDatesJson: '["2026-11-20"]',
+          }),
+          makeDeal({
+            id: 502,
+            showId: 50,
+            dealType: "TIMESALE",
+            salePrice: 50000,
+            discountRate: 30,
+            opensAt: "2026-12-01T00:00:00.000Z",
+            expiresAt: "2026-12-10T14:59:59.000Z",
+          }),
+        ],
+        actorNames: [],
+      },
+      {
+        // VIP 50% (90,000원) vs A석 30% (49,000원) + SPECIAL_DAY event + past perk
+        show: makeShow({ id: 51, title: "가격/스페셜데이 검증 극" }),
+        deals: [
+          makeDeal({
+            id: 511,
+            showId: 51,
+            seatGrade: "VIP",
+            basePrice: 180000,
+            salePrice: 90000,
+            discountRate: 50,
+            isUnconditional: 1,
+          }),
+          makeDeal({
+            id: 512,
+            showId: 51,
+            seatGrade: "A",
+            basePrice: 70000,
+            salePrice: 49000,
+            discountRate: 30,
+            isUnconditional: 1,
+          }),
+          makeDeal({
+            id: 513,
+            showId: 51,
+            dealType: "SPECIAL_DAY",
+            salePrice: null,
+            discountRate: null,
+            expiresAt: null,
+            conditionSummary: "개막 100회 스페셜 데이",
+            eventDatesJson: '["2026-12-05"]',
+          }),
+          makeDeal({
+            id: 514,
+            showId: 51,
+            dealType: "PERK_GOODS",
+            salePrice: null,
+            discountRate: null,
+            expiresAt: null,
+            perkSummary: "종료된 특전",
+            eventDatesJson: '["2026-11-10"]',
+          }),
+        ],
+        actorNames: [],
+      },
+    ];
+
+    const res = filterShowsWithDeals(edgeDataset, { sort: "LOWEST_PRICE" }, now);
+    expect(res.map((c) => c.id)).toEqual([51]);
+    expect(res[0].lowestPrice).toBe(49000);
+    expect(res[0].basePrice).toBe(70000);
+    expect(res[0].maxDiscountRate).toBe(50);
+    expect(res[0].categories).toEqual(["DISCOUNT", "EVENT"]); // expired PERK excluded
+    expect(res[0].eventHighlight?.dealType).toBe("SPECIAL_DAY");
+  });
 });

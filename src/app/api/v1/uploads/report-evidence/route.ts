@@ -1,5 +1,10 @@
+import { and, eq, gte, sql } from "drizzle-orm";
+import { getRuntimeDb } from "@/db/client";
+import { dealReports } from "@/db/schema";
 import { AppError, jsonError } from "@/lib/errors";
+import { startOfKstDayUtc } from "@/lib/kst";
 import { getAuthEnv, requireRuntimeAuth } from "@/server/modules/auth-runtime";
+import { DAILY_REPORT_LIMIT, detectAllowedImageMagic } from "@/server/modules/reports";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -7,6 +12,20 @@ const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 export async function POST(req: Request) {
   try {
     const user = await requireRuntimeAuth(req);
+    const db = getRuntimeDb();
+    const kstStart = startOfKstDayUtc();
+    const [countRow] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(dealReports)
+      .where(and(eq(dealReports.reporterId, user.id), gte(dealReports.createdAt, kstStart)));
+
+    if (Number(countRow?.count ?? 0) >= DAILY_REPORT_LIMIT) {
+      throw new AppError(
+        "DAILY_REPORT_LIMIT_EXCEEDED",
+        `하루 최대 ${DAILY_REPORT_LIMIT}건까지 제보 및 증빙 업로드가 가능합니다.`,
+      );
+    }
+
     const form = await req.formData().catch(() => null);
     const file = form?.get("file");
     if (!(file instanceof File)) {
@@ -19,18 +38,27 @@ export async function POST(req: Request) {
       throw new AppError("VALIDATION_ERROR", "이미지 파일은 최대 5MB까지 업로드할 수 있습니다.");
     }
 
+    const arrayBuffer = await file.arrayBuffer();
+    if (arrayBuffer.byteLength <= 0 || arrayBuffer.byteLength > MAX_BYTES) {
+      throw new AppError("VALIDATION_ERROR", "이미지 파일은 최대 5MB까지 업로드할 수 있습니다.");
+    }
+
+    const detected = detectAllowedImageMagic(new Uint8Array(arrayBuffer.slice(0, 12)));
+    if (!detected) {
+      throw new AppError("VALIDATION_ERROR", "실제 JPG, PNG, WebP 이미지 파일만 업로드할 수 있습니다.");
+    }
+
     const bucket = getAuthEnv().EVIDENCE_BUCKET;
     if (!bucket) {
       throw new AppError("VALIDATION_ERROR", "현재 증빙 이미지 업로드를 지원하지 않아요. 원문 예매처 링크로 제보해 주세요.");
     }
 
-    const ext = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
-    const r2Key = `reports/${user.id}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
-    await bucket.put(r2Key, await file.arrayBuffer(), {
-      httpMetadata: { contentType: file.type },
+    const r2Key = `reports/${user.id}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${detected.ext}`;
+    await bucket.put(r2Key, arrayBuffer, {
+      httpMetadata: { contentType: detected.mime },
     });
 
-    return Response.json({ data: { evidenceR2Key: r2Key, size: file.size } }, { status: 201 });
+    return Response.json({ data: { evidenceR2Key: r2Key, size: arrayBuffer.byteLength } }, { status: 201 });
   } catch (err) {
     return jsonError(err);
   }

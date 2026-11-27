@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-
 import type { AppDb } from "@/db/client";
 import {
   actors,
+  dealHelpfulVotes,
   dealReports,
   deals,
   showActors,
@@ -16,13 +17,23 @@ import {
   type SubRegion,
 } from "@/db/schema";
 import { AppError } from "@/lib/errors";
-import { formatKstDate } from "@/lib/kst";
+import { formatKstDate, isExpired } from "@/lib/kst";
 import { compareDealsForDisplay } from "@/lib/pricing";
 import { parseBasePrices } from "./shows";
 
 export const MAX_CALENDAR_EVENTS = 200;
 export const MAX_SEARCH_PRESETS = 5;
 const RECENT_NOTI_DAYS = 30;
+const D1_IN_ARRAY_CHUNK = 50;
+
+export function chunkArray<T>(items: T[], size = D1_IN_ARRAY_CHUNK): T[][] {
+  if (items.length === 0) return [];
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
 
 export interface CalendarAutoEvent {
   id: string;
@@ -68,8 +79,10 @@ export function buildAutoCalendarEvents(
     if (!deal.showId) continue;
 
     if (deal.dealType === "LOTTERY" && deal.expiresAt) {
-      const kstDate = formatKstDate(new Date(deal.expiresAt));
-      if (inRange(kstDate)) {
+      const expDate = new Date(deal.expiresAt);
+      if (Number.isNaN(expDate.getTime())) continue;
+      const kstDate = formatKstDate(expDate);
+      if (kstDate && inRange(kstDate)) {
         out.push({
           id: `auto-lot-${deal.id}`,
           eventDate: kstDate,
@@ -139,13 +152,16 @@ export async function listBookmarkedShows(db: AppDb, userId: number, now = new D
 
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.show.id);
-  const nowIso = now.toISOString();
-  const activeDeals = await db
-    .select()
-    .from(deals)
-    .where(and(inArray(deals.showId, ids), eq(deals.status, "ACTIVE")));
+  const activeDeals: (typeof deals.$inferSelect)[] = [];
+  for (const chunk of chunkArray(ids)) {
+    const chunkRows = await db
+      .select()
+      .from(deals)
+      .where(and(inArray(deals.showId, chunk), eq(deals.status, "ACTIVE")));
+    activeDeals.push(...chunkRows);
+  }
 
-  const validDeals = activeDeals.filter((d) => !d.expiresAt || d.expiresAt > nowIso);
+  const validDeals = activeDeals.filter((d) => !isExpired(d.expiresAt, now));
 
   return rows.map(({ show }) => {
     const priced = validDeals
@@ -209,9 +225,13 @@ export async function addActorFollow(db: AppDb, userId: number, actorId: number)
   const [exists] = await db.select({ id: actors.id }).from(actors).where(eq(actors.id, actorId)).limit(1);
   if (!exists) throw new AppError("NOT_FOUND", "배우를 찾을 수 없습니다.");
 
-  const already = await isActorFollowed(db, userId, actorId);
-  if (!already) {
-    await db.insert(userActorFollows).values({ userId, actorId }).onConflictDoNothing();
+  const inserted = await db
+    .insert(userActorFollows)
+    .values({ userId, actorId })
+    .onConflictDoNothing()
+    .returning({ id: userActorFollows.id });
+
+  if (inserted.length > 0) {
     await db
       .update(actors)
       .set({ followerCount: sql`${actors.followerCount} + 1` })
@@ -221,11 +241,12 @@ export async function addActorFollow(db: AppDb, userId: number, actorId: number)
 }
 
 export async function removeActorFollow(db: AppDb, userId: number, actorId: number) {
-  const already = await isActorFollowed(db, userId, actorId);
-  if (already) {
-    await db
-      .delete(userActorFollows)
-      .where(and(eq(userActorFollows.userId, userId), eq(userActorFollows.actorId, actorId)));
+  const deleted = await db
+    .delete(userActorFollows)
+    .where(and(eq(userActorFollows.userId, userId), eq(userActorFollows.actorId, actorId)))
+    .returning({ id: userActorFollows.id });
+
+  if (deleted.length > 0) {
     await db
       .update(actors)
       .set({ followerCount: sql`max(0, ${actors.followerCount} - 1)` })
@@ -248,12 +269,16 @@ export async function listFollowedActorShows(db: AppDb, userId: number, now = ne
   if (followed.length === 0) return { actors: [], shows: [] };
 
   const actorIds = followed.map((a) => a.id);
-  const castRows = await db
-    .select({ show: shows, actorId: actors.id, actorName: actors.name })
-    .from(showActors)
-    .innerJoin(shows, eq(showActors.showId, shows.id))
-    .innerJoin(actors, eq(showActors.actorId, actors.id))
-    .where(inArray(showActors.actorId, actorIds));
+  const castRows: Array<{ show: typeof shows.$inferSelect; actorId: number; actorName: string }> = [];
+  for (const chunk of chunkArray(actorIds)) {
+    const chunkRows = await db
+      .select({ show: shows, actorId: actors.id, actorName: actors.name })
+      .from(showActors)
+      .innerJoin(shows, eq(showActors.showId, shows.id))
+      .innerJoin(actors, eq(showActors.actorId, actors.id))
+      .where(inArray(showActors.actorId, chunk));
+    castRows.push(...chunkRows);
+  }
 
   const byShow = new Map<
     number,
@@ -267,13 +292,15 @@ export async function listFollowedActorShows(db: AppDb, userId: number, now = ne
   }
 
   const showIds = Array.from(byShow.keys());
-  const nowIso = now.toISOString();
-  const activeDeals =
-    showIds.length > 0
-      ? (await db.select().from(deals).where(and(inArray(deals.showId, showIds), eq(deals.status, "ACTIVE")))).filter(
-          (d) => !d.expiresAt || d.expiresAt > nowIso,
-        )
-      : [];
+  const fetchedDeals: (typeof deals.$inferSelect)[] = [];
+  for (const chunk of chunkArray(showIds)) {
+    const chunkRows = await db
+      .select()
+      .from(deals)
+      .where(and(inArray(deals.showId, chunk), eq(deals.status, "ACTIVE")));
+    fetchedDeals.push(...chunkRows);
+  }
+  const activeDeals = fetchedDeals.filter((d) => !isExpired(d.expiresAt, now));
 
   return {
     actors: followed,
@@ -426,28 +453,38 @@ export async function getMyCalendar(db: AppDb, userId: number, from: string, to:
 
   const showIdSet = new Set(bookmarkedIds.map((b) => b.showId));
   if (followedActorIds.length > 0) {
-    const actorShows = await db
-      .select({ showId: showActors.showId })
-      .from(showActors)
-      .where(inArray(showActors.actorId, followedActorIds.map((a) => a.actorId)));
-    for (const r of actorShows) showIdSet.add(r.showId);
+    for (const chunk of chunkArray(followedActorIds.map((a) => a.actorId))) {
+      const actorShows = await db
+        .select({ showId: showActors.showId })
+        .from(showActors)
+        .where(inArray(showActors.actorId, chunk));
+      for (const r of actorShows) showIdSet.add(r.showId);
+    }
   }
 
   let autoEvents: CalendarAutoEvent[] = [];
   if (showIdSet.size > 0) {
-    const nowIso = now.toISOString();
-    const dealRows = await db
-      .select({ deal: deals, showTitle: shows.title })
-      .from(deals)
-      .innerJoin(shows, eq(deals.showId, shows.id))
-      .where(
-        and(
-          inArray(deals.showId, Array.from(showIdSet)),
-          eq(deals.status, "ACTIVE"),
-          or(eq(deals.dealType, "LOTTERY"), eq(deals.dealType, "SINGALONG"), eq(deals.dealType, "CURTAIN_CALL"), eq(deals.dealType, "PERK_GOODS")),
-        ),
-      );
-    const activeOnly = dealRows.filter(({ deal }) => !deal.expiresAt || deal.expiresAt > nowIso);
+    const dealRows: Array<{ deal: typeof deals.$inferSelect; showTitle: string }> = [];
+    for (const chunk of chunkArray(Array.from(showIdSet))) {
+      const chunkRows = await db
+        .select({ deal: deals, showTitle: shows.title })
+        .from(deals)
+        .innerJoin(shows, eq(deals.showId, shows.id))
+        .where(
+          and(
+            inArray(deals.showId, chunk),
+            eq(deals.status, "ACTIVE"),
+            or(
+              eq(deals.dealType, "LOTTERY"),
+              eq(deals.dealType, "SINGALONG"),
+              eq(deals.dealType, "CURTAIN_CALL"),
+              eq(deals.dealType, "PERK_GOODS"),
+            ),
+          ),
+        );
+      dealRows.push(...chunkRows);
+    }
+    const activeOnly = dealRows.filter(({ deal }) => !isExpired(deal.expiresAt, now));
     autoEvents = buildAutoCalendarEvents(activeOnly, from, to);
   }
 
@@ -563,21 +600,28 @@ export async function getMyReportsSummary(db: AppDb, userId: number) {
   let totalHelpful = 0;
 
   if (reportIds.length > 0) {
-    const published = await db
-      .select({ clickCount: deals.clickCount, helpfulCount: deals.helpfulCount })
-      .from(deals)
-      .where(inArray(deals.sourceReportId, reportIds));
-    for (const p of published) {
-      totalClicks += p.clickCount;
-      totalHelpful += p.helpfulCount;
+    for (const chunk of chunkArray(reportIds)) {
+      const published = await db
+        .select({ clickCount: deals.clickCount, helpfulCount: deals.helpfulCount })
+        .from(deals)
+        .where(inArray(deals.sourceReportId, chunk));
+      for (const p of published) {
+        totalClicks += p.clickCount;
+        totalHelpful += p.helpfulCount;
+      }
     }
   }
 
   return { totalClicks, totalHelpful, items: reports };
 }
 
-/** Account withdrawal: revoke sessions, delete personal data, anonymize reports, mark WITHDRAWN. */
-export async function withdrawUserAccount(db: AppDb, userId: number, now = new Date()) {
+/** Account withdrawal: revoke sessions, delete personal data & votes, clean R2 evidence, anonymize reports, mark WITHDRAWN. */
+export async function withdrawUserAccount(
+  db: AppDb,
+  userId: number,
+  now = new Date(),
+  opts: { evidenceBucket?: Pick<R2Bucket, "delete"> } = {},
+) {
   const nowIso = now.toISOString();
 
   await db
@@ -590,11 +634,11 @@ export async function withdrawUserAccount(db: AppDb, userId: number, now = new D
     .from(userActorFollows)
     .where(eq(userActorFollows.userId, userId));
 
-  if (followed.length > 0) {
+  for (const chunk of chunkArray(followed.map((f) => f.actorId))) {
     await db
       .update(actors)
       .set({ followerCount: sql`max(0, ${actors.followerCount} - 1)` })
-      .where(inArray(actors.id, followed.map((f) => f.actorId)));
+      .where(inArray(actors.id, chunk));
   }
 
   await Promise.all([
@@ -603,25 +647,35 @@ export async function withdrawUserAccount(db: AppDb, userId: number, now = new D
     db.delete(userNotifications).where(eq(userNotifications.userId, userId)),
     db.delete(userCalendarEvents).where(eq(userCalendarEvents.userId, userId)),
     db.delete(userSearchPresets).where(eq(userSearchPresets.userId, userId)),
+    db.delete(dealHelpfulVotes).where(eq(dealHelpfulVotes.userId, userId)),
   ]);
 
   const userReports = await db
-    .select({ id: dealReports.id })
+    .select({ id: dealReports.id, evidenceR2Key: dealReports.evidenceR2Key })
     .from(dealReports)
     .where(eq(dealReports.reporterId, userId));
 
   if (userReports.length > 0) {
-    const reportIds = userReports.map((r) => r.id);
-    await Promise.all([
-      db
-        .update(dealReports)
-        .set({ reporterNickname: "익명의 관객" })
-        .where(eq(dealReports.reporterId, userId)),
-      db
+    if (opts.evidenceBucket) {
+      const keys = userReports
+        .map((r) => r.evidenceR2Key)
+        .filter((k): k is string => Boolean(k));
+      for (const key of keys) {
+        await opts.evidenceBucket.delete(key).catch(() => undefined);
+      }
+    }
+
+    await db
+      .update(dealReports)
+      .set({ reporterNickname: "익명의 관객", evidenceR2Key: null })
+      .where(eq(dealReports.reporterId, userId));
+
+    for (const chunk of chunkArray(userReports.map((r) => r.id))) {
+      await db
         .update(deals)
         .set({ reporterNickname: "익명의 관객" })
-        .where(inArray(deals.sourceReportId, reportIds)),
-    ]);
+        .where(inArray(deals.sourceReportId, chunk));
+    }
   }
 
   await db

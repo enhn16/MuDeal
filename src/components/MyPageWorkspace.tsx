@@ -2,9 +2,45 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { formatKstDate } from "@/lib/kst";
 import type { AuthUser } from "@/server/modules/auth";
 import type { CalendarAutoEvent, CalendarSavedEvent } from "@/server/modules/personal";
+
+function StoryThumbnail({
+  name,
+  posterUrl,
+  isUnread,
+}: {
+  name: string;
+  posterUrl: string | null;
+  isUnread: boolean;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  if (posterUrl && !failed) {
+    return (
+      <img
+        src={posterUrl}
+        alt={name}
+        referrerPolicy="no-referrer"
+        loading="lazy"
+        onError={() => setFailed(true)}
+        className="h-14 w-14 rounded-sm object-cover"
+      />
+    );
+  }
+
+  return (
+    <span
+      className={`flex h-14 w-14 items-center justify-center rounded-sm text-lg font-bold ${
+        isUnread ? "bg-curtain-noir text-gold-soft" : "bg-surface-sunken text-primary"
+      }`}
+    >
+      {name.slice(0, 1)}
+    </span>
+  );
+}
 
 interface StoryTarget {
   targetType: "SHOW" | "ACTOR";
@@ -88,37 +124,70 @@ export function MyPageWorkspace({
   const [evMemo, setEvMemo] = useState("");
   const [evCategory, setEvCategory] = useState<"WATCH" | "TICKETING" | "EVENT" | "CUSTOM">("WATCH");
   const [evError, setEvError] = useState<string | null>(null);
+  const [evBusy, setEvBusy] = useState(false);
+  const [deletingEventId, setDeletingEventId] = useState<number | null>(null);
+  const [calLoading, setCalLoading] = useState(false);
+  const [calError, setCalError] = useState<string | null>(null);
+  const monthReqSeqRef = useRef(0);
+  const monthAbortRef = useRef<AbortController | null>(null);
+
+  const [nickBusy, setNickBusy] = useState(false);
   const [nickError, setNickError] = useState<string | null>(null);
+  const [logoutBusy, setLogoutBusy] = useState(false);
+  const [unsavingId, setUnsavingId] = useState<number | null>(null);
+  const [savedError, setSavedError] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [withdrawConfirm, setWithdrawConfirm] = useState(false);
   const [withdrawBusy, setWithdrawBusy] = useState(false);
   const [withdrawError, setWithdrawError] = useState<string | null>(null);
 
   async function saveNickname() {
+    if (nickBusy) return;
     const trimmed = nickDraft.trim();
     if (!trimmed) {
       setNickError("닉네임을 입력해 주세요.");
       return;
     }
+    setNickBusy(true);
     setNickError(null);
-    const res = await fetch("/api/v1/me", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ nickname: trimmed }),
-    });
-    if (!res.ok) {
-      setNickError("닉네임을 바꾸지 못했어요. 다시 시도해 주세요.");
-      return;
+    try {
+      const res = await fetch("/api/v1/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nickname: trimmed }),
+      });
+      if (!res.ok) {
+        const json = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+        setNickError(json.error?.message ?? "닉네임을 바꾸지 못했어요. 다시 시도해 주세요.");
+        return;
+      }
+      setNickname(trimmed);
+      setEditingNick(false);
+      router.refresh();
+    } catch {
+      setNickError("연결이 원활하지 않아요. 다시 시도해 주세요.");
+    } finally {
+      setNickBusy(false);
     }
-    setNickname(trimmed);
-    setEditingNick(false);
-    router.refresh();
   }
 
   async function logout() {
-    await fetch("/api/v1/auth/logout", { method: "POST" });
-    router.push("/");
-    router.refresh();
+    if (logoutBusy) return;
+    setLogoutBusy(true);
+    setNickError(null);
+    try {
+      const res = await fetch("/api/v1/auth/logout", { method: "POST" });
+      if (!res.ok) {
+        setNickError("로그아웃을 처리하지 못했어요. 다시 시도해 주세요.");
+        return;
+      }
+      router.push("/");
+      router.refresh();
+    } catch {
+      setNickError("연결이 원활하지 않아요. 다시 시도해 주세요.");
+    } finally {
+      setLogoutBusy(false);
+    }
   }
 
   async function withdrawAccount() {
@@ -141,12 +210,25 @@ export function MyPageWorkspace({
   }
 
   async function unsaveNoti(id: number) {
-    const res = await fetch(`/api/v1/me/notifications/${id}/save`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isSaved: false }),
-    });
-    if (res.ok) setSavedNotis((prev) => prev.filter((n) => n.id !== id));
+    if (unsavingId === id) return;
+    setUnsavingId(id);
+    setSavedError(null);
+    try {
+      const res = await fetch(`/api/v1/me/notifications/${id}/save`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isSaved: false }),
+      });
+      if (!res.ok) {
+        setSavedError("소식 저장을 해제하지 못했어요. 다시 시도해 주세요.");
+        return;
+      }
+      setSavedNotis((prev) => prev.filter((n) => n.id !== id));
+    } catch {
+      setSavedError("연결이 원활하지 않아요. 다시 시도해 주세요.");
+    } finally {
+      setUnsavingId(null);
+    }
   }
 
   async function changeMonth(delta: number) {
@@ -159,51 +241,95 @@ export function MyPageWorkspace({
     const nextPrefix = `${nextY}-${mm}`;
     setSelectedDate(todayKst.startsWith(nextPrefix) ? todayKst : `${nextPrefix}-01`);
     const lastDay = String(new Date(Date.UTC(nextY, nextM + 1, 0)).getUTCDate()).padStart(2, "0");
-    const res = await fetch(`/api/v1/me/calendar?from=${nextY}-${mm}-01&to=${nextY}-${mm}-${lastDay}`);
-    if (res.ok) {
+
+    monthAbortRef.current?.abort();
+    const controller = new AbortController();
+    monthAbortRef.current = controller;
+    const seq = ++monthReqSeqRef.current;
+
+    setCalLoading(true);
+    setCalError(null);
+    try {
+      const res = await fetch(`/api/v1/me/calendar?from=${nextY}-${mm}-01&to=${nextY}-${mm}-${lastDay}`, {
+        signal: controller.signal,
+      });
+      if (seq !== monthReqSeqRef.current) return;
+      if (!res.ok) {
+        setCalError("해당 월의 일정을 불러오지 못했어요. 다시 시도해 주세요.");
+        return;
+      }
       const json = (await res.json()) as {
         data: { autoEvents: CalendarAutoEvent[]; savedEvents: CalendarSavedEvent[] };
       };
+      if (seq !== monthReqSeqRef.current) return;
       setAutoEvents(json.data.autoEvents);
       setSavedEvents(json.data.savedEvents);
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return;
+      if (seq === monthReqSeqRef.current) {
+        setCalError("연결이 원활하지 않아 일정을 불러오지 못했어요.");
+      }
+    } finally {
+      if (seq === monthReqSeqRef.current) {
+        setCalLoading(false);
+      }
     }
   }
 
   async function submitCalendarEvent(e: React.FormEvent) {
     e.preventDefault();
+    if (evBusy) return;
+    setEvBusy(true);
     setEvError(null);
-    const res = await fetch("/api/v1/me/calendar", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        eventDate: selectedDate,
-        eventTime: evTime || null,
-        category: evCategory,
-        title: evTitle,
-        memo: evMemo || null,
-      }),
-    });
-    const json = (await res.json()) as { data?: CalendarSavedEvent; error?: { message: string } };
-    if (!res.ok || !json.data) {
-      setEvError(json.error?.message ?? "일정을 저장하지 못했어요. 다시 시도해 주세요.");
-      return;
+    try {
+      const res = await fetch("/api/v1/me/calendar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          eventDate: selectedDate,
+          eventTime: evTime || null,
+          category: evCategory,
+          title: evTitle,
+          memo: evMemo || null,
+        }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        data?: CalendarSavedEvent;
+        error?: { message: string };
+      };
+      if (!res.ok || !json.data) {
+        setEvError(json.error?.message ?? "일정을 저장하지 못했어요. 다시 시도해 주세요.");
+        return;
+      }
+      setSavedEvents((prev) => [...prev, { ...json.data!, readOnly: false }]);
+      setEvTitle("");
+      setEvTime("");
+      setEvMemo("");
+      setAddingEvent(false);
+    } catch {
+      setEvError("연결이 원활하지 않아요. 다시 시도해 주세요.");
+    } finally {
+      setEvBusy(false);
     }
-    setSavedEvents((prev) => [...prev, { ...json.data!, readOnly: false }]);
-    setEvTitle("");
-    setEvTime("");
-    setEvMemo("");
-    setAddingEvent(false);
   }
 
   async function removeCalendarEvent(id: number) {
+    if (deletingEventId === id) return;
+    setDeletingEventId(id);
     setEvError(null);
-    const res = await fetch(`/api/v1/me/calendar/${id}`, { method: "DELETE" });
-    if (!res.ok) {
-      setEvError("일정을 삭제하지 못했어요. 잠시 후 다시 시도해 주세요.");
-      return;
+    try {
+      const res = await fetch(`/api/v1/me/calendar/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        setEvError("일정을 삭제하지 못했어요. 잠시 후 다시 시도해 주세요.");
+        return;
+      }
+      setSavedEvents((prev) => prev.filter((e) => e.id !== id));
+      setConfirmDeleteId(null);
+    } catch {
+      setEvError("연결이 원활하지 않아요. 다시 시도해 주세요.");
+    } finally {
+      setDeletingEventId(null);
     }
-    setSavedEvents((prev) => prev.filter((e) => e.id !== id));
-    setConfirmDeleteId(null);
   }
 
   const cells = useMemo(() => getMonthGrid(calYear, calMonth), [calYear, calMonth]);
@@ -253,6 +379,7 @@ export function MyPageWorkspace({
               <div className="flex items-center gap-2">
                 <input
                   type="text"
+                  aria-label="새 닉네임"
                   maxLength={20}
                   value={nickDraft}
                   onChange={(e) => setNickDraft(e.target.value)}
@@ -260,13 +387,15 @@ export function MyPageWorkspace({
                 />
                 <button
                   type="button"
+                  disabled={nickBusy}
                   onClick={saveNickname}
-                  className="h-9 rounded-sm bg-secondary px-3 text-xs font-semibold text-on-secondary hover:bg-secondary-hover"
+                  className="h-9 rounded-sm bg-secondary px-3 text-xs font-semibold text-on-secondary hover:bg-secondary-hover disabled:opacity-60"
                 >
-                  저장
+                  {nickBusy ? "저장 중..." : "저장"}
                 </button>
                 <button
                   type="button"
+                  disabled={nickBusy}
                   onClick={() => {
                     setEditingNick(false);
                     setNickError(null);
@@ -294,16 +423,21 @@ export function MyPageWorkspace({
             )}
             <button
               type="button"
+              disabled={logoutBusy}
               onClick={logout}
-              className="h-9 rounded-sm border border-outline bg-surface px-3 text-xs font-semibold text-muted hover:bg-surface-variant hover:text-urgent"
+              className="h-9 rounded-sm border border-outline bg-surface px-3 text-xs font-semibold text-muted hover:bg-surface-variant hover:text-urgent disabled:opacity-60"
             >
-              로그아웃
+              {logoutBusy ? "로그아웃 중..." : "로그아웃"}
             </button>
           </div>
-          {nickError && <p className="w-full text-xs font-semibold text-urgent">{nickError}</p>}
+          {nickError && (
+            <p role="alert" className="w-full text-xs font-semibold text-urgent">
+              {nickError}
+            </p>
+          )}
         </div>
 
-        {/* Story Bar -> clicking goes directly to /shows/[id]#news-feed or /actors/[id]#news-feed */}
+        {/* Story Bar -> clicking goes directly to /shows/[id]/feed or /actors/[id]#news-feed */}
         <div className="flex flex-col gap-3">
           <span className="text-[13px] font-semibold text-on-surface">내 뮤배 · 찜 작품 새 소식</span>
 
@@ -311,7 +445,7 @@ export function MyPageWorkspace({
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-surface-variant px-4 py-3 text-xs text-muted">
               <span>작품을 찜하거나 배우를 팔로우하면 프로필이 이곳에 모여요.</span>
               <Link href="/" className="font-semibold text-primary hover:underline">
-                공연 둘러보기 ↗
+                공연 둘러보기 →
               </Link>
             </div>
           ) : (
@@ -320,7 +454,7 @@ export function MyPageWorkspace({
                 const isUnread = story.unreadCount > 0;
                 const ring = isUnread
                   ? story.targetType === "ACTOR"
-                    ? "border-2 border-champagne-gold"
+                    ? "border-2 border-primary"
                     : "border-2 border-secondary"
                   : "border border-outline";
                 const href =
@@ -335,23 +469,11 @@ export function MyPageWorkspace({
                     className="group flex shrink-0 flex-col items-center gap-1.5"
                   >
                     <span className={`rounded-md bg-surface p-1 ${ring}`}>
-                      {story.posterUrl ? (
-                        <img
-                          src={story.posterUrl}
-                          alt={story.name}
-                          className="h-14 w-14 rounded-sm object-cover"
-                        />
-                      ) : (
-                        <span
-                          className={`flex h-14 w-14 items-center justify-center rounded-sm text-lg font-bold ${
-                            isUnread
-                              ? "bg-curtain-noir text-gold-soft"
-                              : "bg-surface-sunken text-primary"
-                          }`}
-                        >
-                          {story.name.slice(0, 1)}
-                        </span>
-                      )}
+                      <StoryThumbnail
+                        name={story.name}
+                        posterUrl={story.posterUrl}
+                        isUnread={isUnread}
+                      />
                     </span>
                     <span
                       className={`max-w-16 truncate text-xs font-semibold ${
@@ -399,31 +521,44 @@ export function MyPageWorkspace({
           <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12">
             <div className="flex flex-col gap-4 rounded-md border border-outline p-5 lg:col-span-7">
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-bold text-on-surface tabular-nums">
-                  {calYear}년 {calMonth + 1}월
-                </h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-bold text-on-surface tabular-nums">
+                    {calYear}년 {calMonth + 1}월
+                  </h2>
+                  {calLoading && <span className="text-xs text-muted">불러오는 중...</span>}
+                </div>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
                     aria-label="이전 달"
                     onClick={() => changeMonth(-1)}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-xs border border-outline text-on-surface-variant hover:bg-surface-variant"
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-xs border border-outline text-on-surface-variant hover:bg-surface-variant"
                   >
-                    <span className="material-symbols-outlined text-base">chevron_left</span>
+                    <span className="material-symbols-outlined text-base" aria-hidden="true">
+                      chevron_left
+                    </span>
                   </button>
                   <button
                     type="button"
                     aria-label="다음 달"
                     onClick={() => changeMonth(1)}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-xs border border-outline text-on-surface-variant hover:bg-surface-variant"
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-xs border border-outline text-on-surface-variant hover:bg-surface-variant"
                   >
-                    <span className="material-symbols-outlined text-base">chevron_right</span>
+                    <span className="material-symbols-outlined text-base" aria-hidden="true">
+                      chevron_right
+                    </span>
                   </button>
                 </div>
               </div>
 
+              {calError && (
+                <p role="alert" className="rounded-xs border border-urgent bg-urgent-wash px-3 py-2 text-xs font-semibold text-urgent">
+                  {calError}
+                </p>
+              )}
+
               <div className="grid grid-cols-7 border-b border-outline pb-2 text-center text-xs font-semibold">
-                <span className="text-primary">일</span>
+                <span className="text-secondary">일</span>
                 <span className="text-muted">월</span>
                 <span className="text-muted">화</span>
                 <span className="text-muted">수</span>
@@ -432,34 +567,39 @@ export function MyPageWorkspace({
                 <span className="text-on-surface-variant">토</span>
               </div>
 
-              <div className="grid grid-cols-7 gap-y-2 text-center tabular-nums">
+              <div className="grid grid-cols-7 gap-y-1.5 text-center tabular-nums">
                 {cells.map((cell, idx) => {
                   if (!cell) return <div key={`empty-${idx}`} />;
                   const isSelected = cell.iso === selectedDate;
                   const dots = eventDotsByDate.get(cell.iso);
                   const dow = idx % 7;
+                  const hasEvents = Boolean(dots && dots.size > 0);
                   return (
                     <button
                       key={cell.iso}
                       type="button"
+                      aria-label={`${calYear}년 ${calMonth + 1}월 ${cell.day}일${hasEvents ? " (일정 있음)" : ""}`}
+                      aria-pressed={isSelected}
                       onClick={() => setSelectedDate(cell.iso)}
-                      className="flex flex-col items-center py-1"
+                      className="flex min-h-11 flex-col items-center justify-center py-1"
                     >
                       <span
-                        className={`flex h-8 w-8 items-center justify-center rounded-xs text-[13px] ${
+                        className={`flex h-8 w-8 items-center justify-center rounded-full text-[13px] ${
                           isSelected
                             ? "bg-primary font-semibold text-on-primary"
                             : dow === 0
-                              ? "text-primary hover:bg-rose-mist"
-                              : "text-on-surface hover:bg-surface-sunken"
+                              ? "text-secondary hover:bg-rose-mist"
+                              : dow === 6
+                                ? "font-semibold text-on-surface-variant hover:bg-surface-sunken"
+                                : "text-on-surface hover:bg-surface-sunken"
                         }`}
                       >
                         {cell.day}
                       </span>
                       <span className="mt-1 flex h-1.5 gap-1">
-                        {dots?.has("LOTTERY") && <span className="h-1.5 w-1.5 rounded-xs bg-champagne-gold" />}
+                        {dots?.has("LOTTERY") && <span className="h-1.5 w-1.5 rounded-full bg-champagne-gold" />}
                         {(dots?.has("STAGE_EVENT") || dots?.has("SAVED")) && (
-                          <span className="h-1.5 w-1.5 rounded-xs bg-secondary" />
+                          <span className="h-1.5 w-1.5 rounded-full bg-secondary" />
                         )}
                       </span>
                     </button>
@@ -492,6 +632,7 @@ export function MyPageWorkspace({
                 >
                   <div className="flex gap-2">
                     <select
+                      aria-label="일정 유형"
                       value={evCategory}
                       onChange={(e) => setEvCategory(e.target.value as typeof evCategory)}
                       className="h-9 rounded-sm border border-outline bg-surface px-2 text-xs text-on-surface"
@@ -502,6 +643,7 @@ export function MyPageWorkspace({
                     </select>
                     <input
                       type="time"
+                      aria-label="일정 시각 (선택)"
                       value={evTime}
                       onChange={(e) => setEvTime(e.target.value)}
                       className="h-9 rounded-sm border border-outline bg-surface px-2 text-xs text-on-surface"
@@ -509,6 +651,7 @@ export function MyPageWorkspace({
                   </div>
                   <input
                     type="text"
+                    aria-label="일정 제목"
                     required
                     maxLength={80}
                     placeholder="일정 제목 (예: 뮤지컬 <빨래> 관극)"
@@ -518,18 +661,24 @@ export function MyPageWorkspace({
                   />
                   <input
                     type="text"
+                    aria-label="일정 메모 (선택)"
                     maxLength={200}
                     placeholder="메모 (선택)"
                     value={evMemo}
                     onChange={(e) => setEvMemo(e.target.value)}
                     className="h-9 rounded-sm border border-outline bg-surface px-3 text-xs text-on-surface"
                   />
-                  {evError && <p className="text-xs font-semibold text-urgent">{evError}</p>}
+                  {evError && (
+                    <p role="alert" className="text-xs font-semibold text-urgent">
+                      {evError}
+                    </p>
+                  )}
                   <button
                     type="submit"
-                    className="h-9 rounded-sm bg-secondary text-xs font-semibold text-on-secondary hover:bg-secondary-hover"
+                    disabled={evBusy}
+                    className="h-9 rounded-sm bg-secondary text-xs font-semibold text-on-secondary hover:bg-secondary-hover disabled:opacity-60"
                   >
-                    저장하기
+                    {evBusy ? "저장 중..." : "저장하기"}
                   </button>
                 </form>
               )}
@@ -585,13 +734,15 @@ export function MyPageWorkspace({
                           <span className="inline-flex items-center gap-1.5">
                             <button
                               type="button"
+                              disabled={deletingEventId === ev.id}
                               onClick={() => removeCalendarEvent(ev.id)}
-                              className="rounded-xs bg-urgent px-2 py-0.5 text-[11px] font-semibold text-white"
+                              className="rounded-xs bg-urgent px-2 py-0.5 text-[11px] font-semibold text-white disabled:opacity-60"
                             >
-                              삭제 확인
+                              {deletingEventId === ev.id ? "삭제 중..." : "삭제 확인"}
                             </button>
                             <button
                               type="button"
+                              disabled={deletingEventId === ev.id}
                               onClick={() => setConfirmDeleteId(null)}
                               className="text-[11px] font-semibold text-muted hover:text-on-surface"
                             >
@@ -636,6 +787,11 @@ export function MyPageWorkspace({
         {/* Panel 2: 저장한 소식 */}
         {tab === "saved" && (
           <div className="flex flex-col gap-3">
+            {savedError && (
+              <p role="alert" className="rounded-xs border border-urgent bg-urgent-wash px-3 py-2 text-xs font-semibold text-urgent">
+                {savedError}
+              </p>
+            )}
             {savedNotis.length === 0 ? (
               <div className="flex flex-col items-center gap-2 py-8 text-center">
                 <p className="text-sm font-medium text-on-surface">저장한 소식이 아직 없어요.</p>
@@ -662,15 +818,16 @@ export function MyPageWorkspace({
                   <div className="flex items-center gap-3 text-xs font-semibold">
                     {n.showId && (
                       <Link href={`/shows/${n.showId}`} className="text-primary hover:underline">
-                        작품 보기 ↗
+                        작품 보기 →
                       </Link>
                     )}
                     <button
                       type="button"
+                      disabled={unsavingId === n.id}
                       onClick={() => unsaveNoti(n.id)}
-                      className="text-muted hover:text-urgent"
+                      className="text-muted hover:text-urgent disabled:opacity-60"
                     >
-                      저장 해제
+                      {unsavingId === n.id ? "해제 중..." : "저장 해제"}
                     </button>
                   </div>
                 </div>
@@ -690,7 +847,7 @@ export function MyPageWorkspace({
             </span>
           </div>
           <Link href="/reports/new" className="text-xs font-semibold text-primary hover:underline">
-            새 할인 제보하기 ↗
+            새 할인 제보하기 →
           </Link>
         </div>
 
@@ -698,7 +855,7 @@ export function MyPageWorkspace({
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-surface-variant px-4 py-3 text-xs text-muted">
             <span>아직 제보한 할인·이벤트가 없어요.</span>
             <Link href="/reports/new" className="font-semibold text-primary hover:underline">
-              첫 혜택 제보하기 ↗
+              첫 혜택 제보하기 →
             </Link>
           </div>
         ) : (
@@ -713,7 +870,7 @@ export function MyPageWorkspace({
                     {rep.reportedShowTitle} {rep.conditionNote ? `· ${rep.conditionNote}` : ""}
                   </p>
                   <p className="mt-0.5 text-xs text-muted tabular-nums">
-                    {rep.createdAt.slice(0, 10)} 제보 · {rep.channelName}
+                    {formatKstDate(new Date(rep.createdAt))} 제보 · {rep.channelName}
                   </p>
                   {rep.status === "REJECTED" && rep.rejectReasonNote && (
                     <p className="mt-1 text-xs text-urgent">반려 사유: {rep.rejectReasonNote}</p>

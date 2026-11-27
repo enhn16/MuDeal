@@ -22,10 +22,10 @@ export async function generateMetadata({ params }: { params: ShowFeedRouteParams
   const showId = Number(id);
   if (!Number.isInteger(showId) || showId <= 0) return { title: "작품 새소식 — MuDeal" };
   const data = await getShowDetail(getRuntimeDb(), showId);
-  if (!data) return { title: "작품을 찾을 수 없습니다 — MuDeal" };
+  if (!data) return { title: "작품을 찾을 수 없어요 — MuDeal" };
   return {
     title: `${data.show.title} 새소식 피드 — MuDeal`,
-    description: `${data.show.title}의 새로운 할인·특전·현장 이벤트 소식을 확인하세요.`,
+    description: `${data.show.title}의 새로운 할인·특전·현장 이벤트 소식을 확인해요.`,
   };
 }
 

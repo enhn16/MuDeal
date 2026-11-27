@@ -6,12 +6,15 @@ export function ActorAvatar({
   name,
   profileImageUrl,
   isFollowed,
+  size = "md",
 }: {
   name: string;
   profileImageUrl?: string | null;
   isFollowed?: boolean;
+  size?: "md" | "lg";
 }) {
   const [failed, setFailed] = useState(false);
+  const dims = size === "lg" ? "h-16 w-16 rounded-md text-2xl" : "h-10 w-10 rounded-sm text-sm";
 
   if (profileImageUrl && !failed) {
     return (
@@ -21,7 +24,7 @@ export function ActorAvatar({
         loading="lazy"
         referrerPolicy="no-referrer"
         onError={() => setFailed(true)}
-        className={`h-10 w-10 shrink-0 rounded-sm object-cover ${
+        className={`shrink-0 object-cover ${dims} ${
           isFollowed ? "ring-2 ring-champagne-gold" : "border border-outline"
         }`}
       />
@@ -30,8 +33,8 @@ export function ActorAvatar({
 
   return (
     <span
-      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-sm text-sm font-bold ${
-        isFollowed ? "bg-curtain-noir text-gold-soft" : "bg-surface-sunken text-primary"
+      className={`flex shrink-0 items-center justify-center font-bold ${dims} ${
+        isFollowed || size === "lg" ? "bg-curtain-noir text-gold-soft" : "bg-surface-sunken text-primary"
       }`}
     >
       {name.slice(0, 1)}

@@ -2,8 +2,18 @@ import { z } from "zod";
 import { getRuntimeDb } from "@/db/client";
 import { DEAL_TYPES, SEAT_GRADES } from "@/db/schema";
 import { AppError, jsonError } from "@/lib/errors";
+import { normalizeExpiresAtToUtcIso } from "@/lib/kst";
 import { requireRuntimeAdmin } from "@/server/modules/auth-runtime";
 import { createAdminDeal } from "@/server/modules/admin";
+
+const OptionalExpiresAtSchema = z
+  .string()
+  .nullable()
+  .optional()
+  .refine(
+    (v) => v === undefined || v === null || v.trim() === "" || normalizeExpiresAtToUtcIso(v) !== null,
+    "유효한 마감 일시 형식을 입력해 주세요.",
+  );
 
 const CreateDealSchema = z.object({
   showId: z.number().int().positive(),
@@ -17,7 +27,7 @@ const CreateDealSchema = z.object({
   perkSummary: z.string().trim().max(300).nullable().optional(),
   eventDates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).max(31).nullable().optional(),
   externalUrl: z.string().trim().min(8).max(1000),
-  expiresAt: z.string().nullable().optional(),
+  expiresAt: OptionalExpiresAtSchema,
   adminLocked: z.boolean().default(true),
 });
 

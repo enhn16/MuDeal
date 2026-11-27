@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getRuntimeDb } from "@/db/client";
+import { ActorAvatar } from "@/components/ActorAvatar";
 import { ActorShowsGrid } from "@/components/ActorShowsGrid";
 import { FollowActorButton } from "@/components/PersonalButtons";
 import { TargetNewsFeed } from "@/components/TargetNewsFeed";
@@ -18,10 +19,10 @@ export async function generateMetadata({ params }: { params: ActorRouteParams })
   const actorId = Number(id);
   if (!Number.isInteger(actorId) || actorId <= 0) return { title: "배우 상세 — MuDeal" };
   const data = await getActorDetail(getRuntimeDb(), actorId);
-  if (!data) return { title: "배우를 찾을 수 없습니다 — MuDeal" };
+  if (!data) return { title: "배우를 찾을 수 없어요 — MuDeal" };
   return {
     title: `${data.actor.name} 배우 출연작 — MuDeal`,
-    description: `${data.actor.name} 배우의 현재·예정 출연 뮤지컬과 할인·특전 소식을 한눈에 확인하세요.`,
+    description: `${data.actor.name} 배우의 현재·예정 출연 뮤지컬과 할인·특전 소식을 한눈에 확인해요.`,
   };
 }
 
@@ -41,9 +42,12 @@ export default async function ActorDetailPage({ params }: { params: ActorRoutePa
         {/* 1. Actor Profile Header (mudeal_5 parity) */}
         <section className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-outline bg-surface p-6">
           <div className="flex items-center gap-4">
-            <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-md bg-curtain-noir text-2xl font-bold text-gold-soft">
-              {data.actor.name.slice(0, 1)}
-            </span>
+            <ActorAvatar
+              name={data.actor.name}
+              profileImageUrl={data.actor.profileImageUrl}
+              isFollowed={followed}
+              size="lg"
+            />
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-2">
                 <h1 className="text-2xl font-bold text-on-surface">{data.actor.name}</h1>
@@ -57,7 +61,12 @@ export default async function ActorDetailPage({ params }: { params: ActorRoutePa
             </div>
           </div>
 
-          <FollowActorButton actorId={data.actor.id} initialFollowed={followed} size="md" />
+          <FollowActorButton
+            actorId={data.actor.id}
+            initialFollowed={followed}
+            isLoggedIn={Boolean(session)}
+            size="md"
+          />
         </section>
 
         {/* 2. 배우 새소식 피드 (#news-feed) */}

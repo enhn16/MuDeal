@@ -16,7 +16,7 @@ export default async function AdminDealsPage() {
   if (session.user.role !== "ADMIN") {
     return (
       <div className="mx-auto max-w-md px-5 py-16 text-center">
-        <h1 className="text-xl font-bold text-on-surface">관리자 권한이 필요합니다 (403)</h1>
+        <h1 className="text-xl font-bold text-on-surface">관리자 권한이 필요해요 (403)</h1>
         <Link href="/" className="mt-4 inline-block text-sm font-semibold text-primary hover:underline">
           홈으로 돌아가기
         </Link>

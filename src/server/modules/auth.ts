@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { AppDb } from "@/db/client";
 import { users, userSessions } from "@/db/schema";
 import type { CloudflareEnv } from "@/env";
@@ -98,7 +98,12 @@ export function parseCookieHeader(header: string | null): Record<string, string>
     if (idx <= 0) continue;
     const key = part.slice(0, idx).trim();
     const val = part.slice(idx + 1).trim();
-    if (key) out[key] = decodeURIComponent(val);
+    if (!key) continue;
+    try {
+      out[key] = decodeURIComponent(val);
+    } catch {
+      out[key] = val;
+    }
   }
   return out;
 }
@@ -169,16 +174,23 @@ export async function rotateRefreshSession(
   const [session] = await db
     .select()
     .from(userSessions)
-    .where(
-      and(
-        eq(userSessions.refreshTokenHash, hash),
-        isNull(userSessions.revokedAt),
-        gt(userSessions.expiresAt, nowIso),
-      ),
-    )
+    .where(eq(userSessions.refreshTokenHash, hash))
     .limit(1);
 
   if (!session) throw new AppError("UNAUTHORIZED", "세션이 만료되었습니다. 다시 로그인해 주세요.");
+
+  if (session.revokedAt !== null) {
+    // Reuse detection: revoke all remaining active sessions for this user.
+    await db
+      .update(userSessions)
+      .set({ revokedAt: nowIso })
+      .where(and(eq(userSessions.userId, session.userId), isNull(userSessions.revokedAt)));
+    throw new AppError("UNAUTHORIZED", "세션이 만료되었습니다. 다시 로그인해 주세요.");
+  }
+
+  if (session.expiresAt <= nowIso) {
+    throw new AppError("UNAUTHORIZED", "세션이 만료되었습니다. 다시 로그인해 주세요.");
+  }
 
   const [user] = await db
     .select()
@@ -188,10 +200,20 @@ export async function rotateRefreshSession(
 
   if (!user) throw new AppError("UNAUTHORIZED", "유효하지 않은 계정입니다.");
 
-  await db
+  const claimed = await db
     .update(userSessions)
     .set({ revokedAt: nowIso })
-    .where(eq(userSessions.id, session.id));
+    .where(and(eq(userSessions.id, session.id), isNull(userSessions.revokedAt)))
+    .returning({ id: userSessions.id });
+
+  if (claimed.length === 0) {
+    // Concurrent rotation race / reuse detection: revoke all active sessions for this user.
+    await db
+      .update(userSessions)
+      .set({ revokedAt: nowIso })
+      .where(and(eq(userSessions.userId, session.userId), isNull(userSessions.revokedAt)));
+    throw new AppError("UNAUTHORIZED", "세션이 만료되었습니다. 다시 로그인해 주세요.");
+  }
 
   const authUser: AuthUser = {
     id: user.id,
@@ -318,12 +340,23 @@ export async function exchangeOAuthProfile(
     if (!meRes.ok) throw new AppError("UNAUTHORIZED", "카카오 프로필 조회에 실패했습니다.");
     const me = (await meRes.json()) as {
       id: number | string;
-      kakao_account?: { email?: string; profile?: { nickname?: string } };
+      kakao_account?: {
+        email?: string;
+        is_email_verified?: boolean;
+        is_email_valid?: boolean;
+        profile?: { nickname?: string };
+      };
     };
+    const verifiedEmail =
+      me.kakao_account?.is_email_verified === true &&
+      me.kakao_account?.is_email_valid === true &&
+      me.kakao_account.email
+        ? me.kakao_account.email
+        : null;
     return {
       subject: String(me.id),
       nickname: me.kakao_account?.profile?.nickname?.trim() || "",
-      email: me.kakao_account?.email ?? null,
+      email: verifiedEmail,
     };
   }
 
@@ -346,10 +379,16 @@ export async function exchangeOAuthProfile(
     headers: { Authorization: `Bearer ${tokenJson.access_token}` },
   });
   if (!meRes.ok) throw new AppError("UNAUTHORIZED", "구글 프로필 조회에 실패했습니다.");
-  const me = (await meRes.json()) as { sub: string; name?: string; email?: string };
+  const me = (await meRes.json()) as {
+    sub: string;
+    name?: string;
+    email?: string;
+    email_verified?: boolean;
+  };
+  const verifiedEmail = me.email_verified === true && me.email ? me.email : null;
   return {
     subject: me.sub,
-    nickname: me.name?.trim() || me.email?.split("@")[0] || "뮤지컬관객",
-    email: me.email ?? null,
+    nickname: me.name?.trim() || verifiedEmail?.split("@")[0] || "뮤지컬관객",
+    email: verifiedEmail,
   };
 }

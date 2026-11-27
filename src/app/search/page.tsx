@@ -82,8 +82,12 @@ function toPresetParams(q: ShowSearchQuery): Record<string, string | number | st
 }
 
 function buildHref(base: ShowSearchQuery, patch: Partial<ShowSearchQuery>): string {
-  const next: ShowSearchQuery = { ...base, ...patch, page: 1 };
-  const qs = serializeSearchParams(toPresetParams(next));
+  const next: ShowSearchQuery = { ...base, ...patch };
+  const params = toPresetParams(next);
+  if (patch.page && patch.page > 1) {
+    params.page = patch.page;
+  }
+  const qs = serializeSearchParams(params);
   return qs ? `/search?${qs}` : "/search";
 }
 
@@ -158,11 +162,66 @@ export default async function SearchPage({ searchParams }: { searchParams: RawSe
         ? "EVENT"
         : "DISCOUNT");
 
+  const hasInvertedDate = Boolean(query.dateFrom && query.dateTo && query.dateFrom > query.dateTo);
+  const hasInvertedPrice = Boolean(
+    query.priceMin !== undefined && query.priceMax !== undefined && query.priceMin > query.priceMax,
+  );
+  const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
+
   return (
     <div className="pb-14">
       {/* 4-Axis Filter Panel */}
       <section className="border-b border-outline bg-surface-variant">
         <div className="mx-auto flex max-w-[1100px] flex-col gap-4 px-5 py-6 lg:px-0">
+          {/* Integrated Keyword Search (preserves active 4-axis filters) */}
+          <form
+            key={query.q ?? ""}
+            action="/search"
+            method="get"
+            className="flex flex-col gap-2 sm:flex-row sm:items-center"
+          >
+            {hiddenParamInputs(query, ["q"])}
+            <label htmlFor="search-page-keyword" className="sr-only">
+              작품명, 뮤지컬 배우, 공연장 검색
+            </label>
+            <div className="relative flex flex-1 items-center">
+              <span
+                className="material-symbols-outlined pointer-events-none absolute left-3 text-lg text-muted"
+                aria-hidden="true"
+              >
+                search
+              </span>
+              <input
+                id="search-page-keyword"
+                type="search"
+                name="q"
+                defaultValue={query.q ?? ""}
+                placeholder="현재 필터를 유지한 채 작품명 · 배우 · 공연장 검색"
+                className="h-11 w-full rounded-sm border border-outline bg-surface pr-4 pl-10 text-sm text-on-surface placeholder:text-hint transition-colors focus:border-secondary focus:outline-none"
+              />
+            </div>
+            <button
+              type="submit"
+              className="h-11 shrink-0 rounded-sm bg-secondary px-5 text-sm font-semibold text-on-secondary transition-colors hover:bg-secondary-hover"
+            >
+              검색
+            </button>
+          </form>
+
+          {(hasInvertedDate || hasInvertedPrice) && (
+            <div
+              role="alert"
+              className="rounded-sm border border-urgent bg-urgent-wash px-3.5 py-2.5 text-xs font-semibold text-urgent"
+            >
+              {hasInvertedDate && (
+                <p>관람 시작일이 종료일보다 늦어요. 날짜 범위를 다시 확인해 주세요.</p>
+              )}
+              {hasInvertedPrice && (
+                <p>최소 가격이 최대 가격보다 높아요. 가격 범위를 다시 확인해 주세요.</p>
+              )}
+            </div>
+          )}
+
           {/* Axis 1: 혜택 유형 */}
           <div className="grid grid-cols-1 items-center gap-2 md:grid-cols-12">
             <span className="text-xs font-semibold text-on-surface md:col-span-2">혜택 유형</span>
@@ -405,6 +464,7 @@ export default async function SearchPage({ searchParams }: { searchParams: RawSe
                 <Link
                   key={opt.key}
                   href={buildHref(query, { sort: opt.key })}
+                  aria-current={active ? "true" : undefined}
                   className={`rounded-xs px-2.5 py-1 text-xs font-semibold ${
                     active ? "bg-rose-mist text-primary" : "text-muted hover:text-on-surface"
                   }`}
@@ -441,11 +501,62 @@ export default async function SearchPage({ searchParams }: { searchParams: RawSe
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-2 items-stretch gap-x-4 gap-y-8 sm:grid-cols-3 lg:grid-cols-4 lg:gap-x-5">
-            {result.items.map((show) => (
-              <ShowCard key={show.id} show={show} viewCategory={viewCategory} />
-            ))}
-          </div>
+          <>
+            <div className="grid grid-cols-2 items-stretch gap-x-4 gap-y-8 sm:grid-cols-3 lg:grid-cols-4 lg:gap-x-5">
+              {result.items.map((show) => (
+                <ShowCard key={show.id} show={show} viewCategory={viewCategory} />
+              ))}
+            </div>
+
+            {totalPages > 1 && (
+              <nav
+                aria-label="검색 결과 페이지 이동"
+                className="mt-10 flex items-center justify-center gap-3"
+              >
+                {result.page > 1 ? (
+                  <Link
+                    href={buildHref(query, { page: result.page - 1 })}
+                    className="inline-flex h-10 items-center gap-1 rounded-sm border border-outline bg-surface px-4 text-xs font-semibold text-on-surface hover:border-primary hover:bg-surface-variant hover:text-primary"
+                  >
+                    <span className="material-symbols-outlined text-base" aria-hidden="true">
+                      chevron_left
+                    </span>
+                    <span>이전</span>
+                  </Link>
+                ) : (
+                  <span className="inline-flex h-10 items-center gap-1 rounded-sm border border-outline bg-surface-variant px-4 text-xs font-semibold text-hint">
+                    <span className="material-symbols-outlined text-base" aria-hidden="true">
+                      chevron_left
+                    </span>
+                    <span>이전</span>
+                  </span>
+                )}
+
+                <span className="px-2 text-xs font-semibold text-on-surface-variant tabular-nums">
+                  {result.page} / {totalPages} 페이지
+                </span>
+
+                {result.page < totalPages ? (
+                  <Link
+                    href={buildHref(query, { page: result.page + 1 })}
+                    className="inline-flex h-10 items-center gap-1 rounded-sm border border-outline bg-surface px-4 text-xs font-semibold text-on-surface hover:border-primary hover:bg-surface-variant hover:text-primary"
+                  >
+                    <span>다음</span>
+                    <span className="material-symbols-outlined text-base" aria-hidden="true">
+                      chevron_right
+                    </span>
+                  </Link>
+                ) : (
+                  <span className="inline-flex h-10 items-center gap-1 rounded-sm border border-outline bg-surface-variant px-4 text-xs font-semibold text-hint">
+                    <span>다음</span>
+                    <span className="material-symbols-outlined text-base" aria-hidden="true">
+                      chevron_right
+                    </span>
+                  </span>
+                )}
+              </nav>
+            )}
+          </>
         )}
       </section>
     </div>

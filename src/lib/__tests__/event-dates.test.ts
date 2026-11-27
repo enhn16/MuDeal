@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  calcKstDDay,
   compareDatedBenefitPriority,
   expandDateRange,
   extractDatesFromKoreanText,
@@ -7,7 +8,10 @@ import {
   formatBookingDeadline,
   formatEventDates,
   formatEventDateWithDow,
+  formatKstDate,
+  isExpired,
   normalizeEventDates,
+  normalizeExpiresAtToUtcIso,
 } from "@/lib/kst";
 
 describe("event date formatting & normalization", () => {
@@ -95,5 +99,70 @@ describe("event date formatting & normalization", () => {
       { id: "active", dates: ["2026-11-24", "2026-11-25", "2026-11-26", "2026-11-27", "2026-11-28"] },
     ].sort((a, b) => compareDatedBenefitPriority(a.dates, b.dates, today));
     expect(sorted.map((x) => x.id)).toEqual(["active", "sooner", "later", "undated"]);
+  });
+
+  it("validates expiresAt strictly without RangeError and defends invalid Date inputs", () => {
+    expect(normalizeExpiresAtToUtcIso("2026-12-01")).toBe("2026-12-01T14:59:59.000Z");
+    expect(normalizeExpiresAtToUtcIso("2026-12-01T23:59:59")).toBe("2026-12-01T14:59:59.000Z");
+    expect(normalizeExpiresAtToUtcIso("2026-12-01T24:00:00")).toBeNull();
+    expect(normalizeExpiresAtToUtcIso("2026-02-30")).toBeNull();
+    expect(normalizeExpiresAtToUtcIso("내일까지")).toBeNull();
+
+    expect(formatKstDate(new Date("invalid"))).toBe("");
+    expect(isExpired("내일까지", new Date("2026-11-27T00:00:00Z"))).toBe(false);
+    expect(Number.isNaN(calcKstDDay("invalid-date", new Date("2026-11-27T00:00:00Z")))).toBe(true);
+  });
+
+  it("handles year-boundary ranges without leaking prior-year ghost dates and blocks non-date numbers", () => {
+    const krCrossYear = extractDatesFromKoreanText("12월 24일 ~ 1월 5일 연말연시 특전", 2026);
+    expect(krCrossYear[0]).toBe("2026-12-24");
+    expect(krCrossYear.at(-1)).toBe("2027-01-05");
+    expect(krCrossYear).not.toContain("2026-01-05");
+
+    const numCrossYear = extractDatesFromKoreanText("12/28 ~ 1/3 스페셜 위크", 2026);
+    expect(numCrossYear[0]).toBe("2026-12-28");
+    expect(numCrossYear.at(-1)).toBe("2027-01-03");
+    expect(numCrossYear).not.toContain("2026-01-03");
+
+    expect(extractDatesFromKoreanText("1/2 가격 할인 · 3/4분기 특가 · 1-2-3차 오픈 · 1.5~2시간", 2026)).toEqual([]);
+  });
+
+  it("preserves bilateral performance ranges and resolves year-boundary booking deadlines near now", () => {
+    const decNow = new Date("2026-12-20T03:00:00.000Z");
+
+    const perfRange1 = extractDiscountDatesFromLabel("오프닝 위크 할인 (11/24~12/1 공연)", {
+      now: new Date("2026-11-20T03:00:00.000Z"),
+    });
+    expect(perfRange1.bookingExpiresAt).toBeNull();
+    expect(perfRange1.applicableDates[0]).toBe("2026-11-24");
+    expect(perfRange1.applicableDates.at(-1)).toBe("2026-12-01");
+
+    const perfRange2 = extractDiscountDatesFromLabel("12월 24일~12월 31일 연말 할인", { now: decNow });
+    expect(perfRange2.bookingExpiresAt).toBeNull();
+    expect(perfRange2.applicableDates[0]).toBe("2026-12-24");
+    expect(perfRange2.applicableDates.at(-1)).toBe("2026-12-31");
+
+    // Standalone Jan booking deadline in Dec -> resolves to next year (2027-01-10)
+    const janBooking = extractDiscountDatesFromLabel("조기예매(~1/10까지 예매시) 20%", { now: decNow });
+    expect(janBooking.bookingExpiresAt).toBe("2027-01-10T14:59:59.000Z");
+
+    // Earlybird deadline >14d before Feb 2027 opening -> stays Dec 2026 (NOT shifted to Dec 2027)
+    const preOpenBooking = extractDiscountDatesFromLabel("조기예매(~12/20까지 예매시) 20%", {
+      showStartDate: "2027-02-01",
+      showEndDate: "2027-12-31",
+      now: new Date("2026-12-10T03:00:00.000Z"),
+    });
+    expect(preOpenBooking.bookingExpiresAt).toBe("2026-12-20T14:59:59.000Z");
+  });
+
+  it("picks closest valid year on multi-year shows and drops sentinel 2099 dates", () => {
+    const now = new Date("2026-12-01T03:00:00.000Z");
+    expect(
+      normalizeEventDates(["2023-12-25", "2099-12-31"], {
+        showStartDate: "2025-11-01",
+        showEndDate: "2027-03-01",
+        now,
+      }),
+    ).toEqual(["2026-12-25"]);
   });
 });

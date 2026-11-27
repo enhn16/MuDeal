@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getRuntimeDb } from "@/db/client";
 import { homeCurations } from "@/db/schema";
 import { AppError, jsonError } from "@/lib/errors";
+import { validateCurationImageUrl, validateCurationLinkUrl } from "@/server/modules/admin";
 import { requireRuntimeAdmin } from "@/server/modules/auth-runtime";
 import { writeAuditLog } from "@/server/modules/reports";
 
@@ -35,6 +36,8 @@ export async function POST(req: Request) {
     const admin = await requireRuntimeAdmin(req);
     const parsed = CreateCurationSchema.safeParse(await req.json().catch(() => null));
     if (!parsed.success) throw new AppError("VALIDATION_ERROR", "배너 큐레이션 입력값을 확인해 주세요.");
+    const safeLinkUrl = validateCurationLinkUrl(parsed.data.linkUrl);
+    const safeImageUrl = validateCurationImageUrl(parsed.data.imageUrl);
     const db = getRuntimeDb();
     const [created] = await db
       .insert(homeCurations)
@@ -44,8 +47,8 @@ export async function POST(req: Request) {
         eyebrow: parsed.data.eyebrow || null,
         title: parsed.data.title,
         subtitle: parsed.data.subtitle || null,
-        imageUrl: parsed.data.imageUrl || null,
-        linkUrl: parsed.data.linkUrl,
+        imageUrl: safeImageUrl,
+        linkUrl: safeLinkUrl,
         sortOrder: parsed.data.sortOrder,
         isActive: 1,
       })

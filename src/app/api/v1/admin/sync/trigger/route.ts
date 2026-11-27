@@ -9,6 +9,7 @@ import { syncKopisShows } from "@/server/sync/kopis";
 import {
   createGeminiSynopsisExtractor,
   createGeminiVisionExtractor,
+  parseDailyLimit,
   populateMissingSynopses,
   processPendingOcrJobs,
 } from "@/server/sync/ocr";
@@ -33,22 +34,52 @@ export async function POST(req: Request) {
     } else if (target === "CHANNELS") {
       const results = [];
       for (const adapter of DEFAULT_CHANNEL_ADAPTERS) {
-        results.push(await runChannelAdapter(db, adapter));
+        try {
+          results.push(await runChannelAdapter(db, adapter));
+        } catch (err) {
+          results.push({
+            sourceName: adapter.sourceName,
+            status: "FAILED",
+            fetchedCount: 0,
+            publishedCount: 0,
+            draftCount: 0,
+            alert: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
       result = results;
     } else if (target === "OCR") {
       if (!cfEnv.GEMINI_API_KEY) {
         throw new AppError("VALIDATION_ERROR", "GEMINI_API_KEY가 설정되지 않아 OCR을 실행할 수 없습니다.");
       }
-      const dailyLimit = Math.max(1, Number(cfEnv.OCR_DAILY_LIMIT || 100));
-      const ocr = await processPendingOcrJobs(db, {
-        dailyLimit,
-        extractor: createGeminiVisionExtractor(cfEnv.GEMINI_API_KEY),
-      });
-      const synopses = await populateMissingSynopses(db, {
-        extractor: createGeminiSynopsisExtractor(cfEnv.GEMINI_API_KEY),
-        batchSize: 4,
-      });
+      const dailyLimit = parseDailyLimit(cfEnv.OCR_DAILY_LIMIT);
+      let ocr:
+        | { processed: number; draftsCreated: number; skippedByLimit: boolean; remainingDailyLimit: number }
+        | { error: string; remainingDailyLimit: number };
+      try {
+        ocr = await processPendingOcrJobs(db, {
+          dailyLimit,
+          extractor: createGeminiVisionExtractor(cfEnv.GEMINI_API_KEY),
+        });
+      } catch (err) {
+        ocr = {
+          error: err instanceof Error ? err.message : String(err),
+          remainingDailyLimit: 0,
+        };
+      }
+
+      let synopses: { checked: number; populated: number } | { error: string };
+      try {
+        synopses = await populateMissingSynopses(db, {
+          extractor: createGeminiSynopsisExtractor(cfEnv.GEMINI_API_KEY),
+          batchSize: 2,
+          remainingDailyLimit: ocr.remainingDailyLimit,
+        });
+      } catch (err) {
+        synopses = { error: err instanceof Error ? err.message : String(err) };
+      }
+
       result = { ocr, synopses };
     } else {
       result = await expireEndedDeals(db);

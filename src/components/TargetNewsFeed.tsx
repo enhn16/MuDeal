@@ -34,7 +34,11 @@ export function TargetNewsFeed({
   const [unreadItems, setUnreadItems] = useState<FeedItem[]>([]);
   const [recentItems, setRecentItems] = useState<FeedItem[]>([]);
   const [loading, setLoading] = useState(isLoggedIn);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [savingId, setSavingId] = useState<number | null>(null);
+  const [calBusyId, setCalBusyId] = useState<number | null>(null);
   const [calAdded, setCalAdded] = useState<Record<number, boolean>>({});
+  const [actionError, setActionError] = useState<string | null>(null);
 
   async function fetchFeed(mode: "unread" | "recent") {
     const qs = new URLSearchParams({
@@ -53,11 +57,16 @@ export function TargetNewsFeed({
     let active = true;
     (async () => {
       setLoading(true);
-      const unread = await fetchFeed("unread");
-      if (!active) return;
-      setUnreadItems(unread);
-      if (unread.length > 0) router.refresh();
-      setLoading(false);
+      try {
+        const unread = await fetchFeed("unread");
+        if (!active) return;
+        setUnreadItems(unread);
+        if (unread.length > 0) router.refresh();
+      } catch {
+        if (active) setActionError("소식을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.");
+      } finally {
+        if (active) setLoading(false);
+      }
     })();
     return () => {
       active = false;
@@ -66,41 +75,76 @@ export function TargetNewsFeed({
   }, [isLoggedIn, targetType, targetId]);
 
   async function toggleHistory() {
+    if (historyLoading) return;
+    setActionError(null);
     if (!showPast && recentItems.length === 0) {
-      const past = await fetchFeed("recent");
-      setRecentItems(past);
+      setHistoryLoading(true);
+      try {
+        const past = await fetchFeed("recent");
+        setRecentItems(past);
+      } catch {
+        setActionError("지난 소식을 불러오지 못했어요. 다시 시도해 주세요.");
+        return;
+      } finally {
+        setHistoryLoading(false);
+      }
     }
     setShowPast((v) => !v);
   }
 
   async function toggleSave(item: FeedItem) {
+    if (savingId === item.id) return;
+    setSavingId(item.id);
+    setActionError(null);
     const next = !item.isSaved;
-    const res = await fetch(`/api/v1/me/notifications/${item.id}/save`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isSaved: next }),
-    });
-    if (!res.ok) return;
-    const update = (list: FeedItem[]) =>
-      list.map((n) => (n.id === item.id ? { ...n, isSaved: next ? 1 : 0 } : n));
-    setUnreadItems(update);
-    setRecentItems(update);
+    try {
+      const res = await fetch(`/api/v1/me/notifications/${item.id}/save`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isSaved: next }),
+      });
+      if (!res.ok) {
+        setActionError("소식 저장 상태를 바꾸지 못했어요. 다시 시도해 주세요.");
+        return;
+      }
+      const update = (list: FeedItem[]) =>
+        list.map((n) => (n.id === item.id ? { ...n, isSaved: next ? 1 : 0 } : n));
+      setUnreadItems(update);
+      setRecentItems(update);
+    } catch {
+      setActionError("연결이 원활하지 않아요. 다시 시도해 주세요.");
+    } finally {
+      setSavingId(null);
+    }
   }
 
   async function addToCalendar(item: FeedItem) {
-    const res = await fetch("/api/v1/me/calendar", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        eventDate: todayKst,
-        category: "EVENT",
-        title: item.title.slice(0, 80),
-        memo: item.body.slice(0, 200),
-        sourceShowId: item.showId,
-        sourceDealId: item.dealId,
-      }),
-    });
-    if (res.ok) setCalAdded((prev) => ({ ...prev, [item.id]: true }));
+    if (calBusyId === item.id || calAdded[item.id]) return;
+    setCalBusyId(item.id);
+    setActionError(null);
+    try {
+      const res = await fetch("/api/v1/me/calendar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          eventDate: todayKst,
+          category: "EVENT",
+          title: item.title.slice(0, 80),
+          memo: item.body.slice(0, 200),
+          sourceShowId: item.showId,
+          sourceDealId: item.dealId,
+        }),
+      });
+      if (!res.ok) {
+        setActionError("캘린더에 담지 못했어요. 잠시 후 다시 시도해 주세요.");
+        return;
+      }
+      setCalAdded((prev) => ({ ...prev, [item.id]: true }));
+    } catch {
+      setActionError("연결이 원활하지 않아요. 다시 시도해 주세요.");
+    } finally {
+      setCalBusyId(null);
+    }
   }
 
   const displayed = showPast ? recentItems : unreadItems;
@@ -115,9 +159,10 @@ export function TargetNewsFeed({
         {isLoggedIn && (
           <button
             type="button"
+            disabled={historyLoading}
             onClick={toggleHistory}
             aria-pressed={showPast}
-            className={`inline-flex h-9 items-center justify-center gap-1 rounded-xs border px-3 text-xs font-semibold transition-colors ${
+            className={`inline-flex h-9 items-center justify-center gap-1 rounded-xs border px-3 text-xs font-semibold transition-colors disabled:opacity-60 ${
               showPast
                 ? "border-secondary bg-rose-mist text-primary"
                 : "border-outline bg-surface text-on-surface-variant hover:bg-surface-variant"
@@ -126,16 +171,22 @@ export function TargetNewsFeed({
             <span className="material-symbols-outlined text-base" aria-hidden="true">
               history
             </span>
-            <span>최근 소식 다시 보기</span>
+            <span>{historyLoading ? "불러오는 중..." : "최근 소식 다시 보기"}</span>
           </button>
         )}
       </div>
+
+      {actionError && (
+        <p role="alert" className="rounded-sm border border-urgent bg-urgent-wash px-3 py-2 text-xs font-semibold text-urgent">
+          {actionError}
+        </p>
+      )}
 
       {!isLoggedIn ? (
         <p className="text-sm text-muted">
           <Link
             href={`/login?redirectUrl=${encodeURIComponent(
-              targetType === "ACTOR" ? `/actors/${targetId}#news-feed` : `/shows/${targetId}#news-feed`,
+              targetType === "ACTOR" ? `/actors/${targetId}#news-feed` : `/shows/${targetId}/feed#news-feed`,
             )}`}
             className="font-semibold text-primary hover:underline"
           >
@@ -182,9 +233,10 @@ export function TargetNewsFeed({
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
+                    disabled={savingId === item.id}
                     onClick={() => toggleSave(item)}
                     aria-pressed={Boolean(item.isSaved)}
-                    className={`inline-flex h-8 w-28 items-center justify-center gap-1 rounded-xs border text-xs font-semibold transition-colors ${
+                    className={`inline-flex h-8 w-28 items-center justify-center gap-1 rounded-xs border text-xs font-semibold transition-colors disabled:opacity-60 ${
                       item.isSaved
                         ? "border-secondary bg-rose-mist text-primary"
                         : "border-outline bg-surface text-on-surface-variant hover:bg-rose-mist hover:text-primary"
@@ -198,9 +250,9 @@ export function TargetNewsFeed({
                   <button
                     type="button"
                     onClick={() => addToCalendar(item)}
-                    disabled={Boolean(calAdded[item.id])}
+                    disabled={calBusyId === item.id || Boolean(calAdded[item.id])}
                     aria-pressed={Boolean(calAdded[item.id])}
-                    className={`inline-flex h-8 w-32 items-center justify-center gap-1 rounded-xs border text-xs font-semibold transition-colors ${
+                    className={`inline-flex h-8 w-32 items-center justify-center gap-1 rounded-xs border text-xs font-semibold transition-colors disabled:opacity-60 ${
                       calAdded[item.id]
                         ? "border-secondary bg-rose-mist text-primary"
                         : "border-outline bg-surface text-on-surface-variant hover:bg-rose-mist hover:text-primary"
@@ -209,7 +261,13 @@ export function TargetNewsFeed({
                     <span className="material-symbols-outlined text-sm" aria-hidden="true">
                       calendar_add_on
                     </span>
-                    <span>{calAdded[item.id] ? "캘린더 담김 ✓" : "캘린더에 담기"}</span>
+                    <span>
+                      {calBusyId === item.id
+                        ? "담는 중..."
+                        : calAdded[item.id]
+                          ? "캘린더 담김 ✓"
+                          : "캘린더에 담기"}
+                    </span>
                   </button>
                 </div>
 

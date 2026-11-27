@@ -14,6 +14,20 @@ const CATEGORY_DEFAULT_TYPE: Record<ReportCategory, DealType> = {
   event: "CURTAIN_CALL",
 };
 
+const DEAL_SUBTYPES: Array<{ value: DealType; label: string }> = [
+  { value: "TIMESALE", label: "타임세일" },
+  { value: "LOTTERY", label: "로터리 추첨" },
+  { value: "CARD_EVENT", label: "카드·제휴" },
+  { value: "DISCOUNT_SITE", label: "할인사이트" },
+  { value: "SPECIAL_DAY", label: "스페셜 데이" },
+];
+
+const EVENT_SUBTYPES: Array<{ value: DealType; label: string }> = [
+  { value: "CURTAIN_CALL", label: "스페셜 커튼콜" },
+  { value: "SINGALONG", label: "싱어롱" },
+  { value: "SPECIAL_DAY", label: "스페셜 데이" },
+];
+
 export function ReportForm({
   defaultNickname,
   shows,
@@ -33,6 +47,7 @@ export function ReportForm({
   const [reportedDiscountRate, setReportedDiscountRate] = useState("");
   const [isUnconditional, setIsUnconditional] = useState(true);
   const [conditionNote, setConditionNote] = useState("");
+  const [expiresDate, setExpiresDate] = useState("");
   const [eventStartDate, setEventStartDate] = useState("");
   const [eventEndDate, setEventEndDate] = useState("");
   const [reporterNickname, setReporterNickname] = useState(defaultNickname);
@@ -40,6 +55,25 @@ export function ReportForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+
+  function resetFormForNextReport() {
+    setCategory("deal");
+    setShowId("");
+    setReportedShowTitle("");
+    setChannelName("NOL티켓");
+    setDealType("TIMESALE");
+    setSeatGrade("ALL");
+    setExternalUrl("");
+    setReportedPrice("");
+    setReportedDiscountRate("");
+    setIsUnconditional(true);
+    setConditionNote("");
+    setExpiresDate("");
+    setEventStartDate("");
+    setEventEndDate("");
+    setError(null);
+    setSuccess(false);
+  }
 
   useEffect(() => {
     try {
@@ -71,6 +105,7 @@ export function ReportForm({
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -96,9 +131,13 @@ export function ReportForm({
           ? `[${datePrefix}] ${conditionNote.trim()}`
           : datePrefix || conditionNote.trim() || null;
       const computedExpiresAt =
-        category !== "deal" && (eventEndDate || eventStartDate)
-          ? new Date(`${eventEndDate || eventStartDate}T23:59:59+09:00`).toISOString()
-          : null;
+        category === "deal"
+          ? expiresDate
+            ? new Date(`${expiresDate}T23:59:59+09:00`).toISOString()
+            : null
+          : eventEndDate || eventStartDate
+            ? new Date(`${eventEndDate || eventStartDate}T23:59:59+09:00`).toISOString()
+            : null;
 
       const res = await fetch("/api/v1/reports", {
         method: "POST",
@@ -118,7 +157,7 @@ export function ReportForm({
           reporterNickname: reporterNickname || defaultNickname,
         }),
       });
-      const json = (await res.json()) as { error?: { message: string } };
+      const json = (await res.json().catch(() => ({}))) as { error?: { message: string } };
       if (!res.ok) {
         saveDraftLocally();
         setError(json.error?.message ?? "제보를 등록하지 못했어요. 작성하던 내용은 임시 저장해 두었어요.");
@@ -127,6 +166,9 @@ export function ReportForm({
       localStorage.removeItem(DRAFT_KEY);
       setSuccess(true);
       router.refresh();
+    } catch {
+      saveDraftLocally();
+      setError("네트워크 연결이 원활하지 않아요. 작성하던 내용은 임시 저장해 두었어요.");
     } finally {
       setBusy(false);
     }
@@ -142,7 +184,7 @@ export function ReportForm({
         <p className="text-sm text-muted">
           검수를 마치면 홈 &apos;제보해주신 딜&apos;에 닉네임과 확인·도움 수가 함께 올라가요.
         </p>
-        <div className="mt-2 flex gap-3">
+        <div className="mt-2 flex flex-wrap justify-center gap-3">
           <button
             type="button"
             onClick={() => router.push("/my")}
@@ -152,8 +194,8 @@ export function ReportForm({
           </button>
           <button
             type="button"
-            onClick={() => setSuccess(false)}
-            className="h-10 rounded-sm border border-outline px-4 text-sm font-semibold text-on-surface-variant"
+            onClick={resetFormForNextReport}
+            className="h-10 rounded-sm border border-outline px-4 text-sm font-semibold text-on-surface-variant hover:bg-surface-variant"
           >
             추가 제보하기
           </button>
@@ -167,22 +209,23 @@ export function ReportForm({
       {/* 1. 제보 유형 (mudeal_4 parity) */}
       <div className="flex flex-col gap-2">
         <span className="text-[13px] font-semibold text-on-surface">제보 유형</span>
-        <div className="grid grid-cols-3 gap-3">
+        <div role="group" aria-label="제보 유형" className="grid grid-cols-3 gap-2 sm:gap-3">
           {(
             [
               ["deal", "할인"],
               ["perk", "특전"],
-              ["event", "싱어롱·스페셜 커튼콜"],
+              ["event", "싱어롱·커튼콜"],
             ] as const
           ).map(([key, label]) => (
             <button
               key={key}
               type="button"
+              aria-pressed={category === key}
               onClick={() => {
                 setCategory(key);
                 setDealType(CATEGORY_DEFAULT_TYPE[key]);
               }}
-              className={`h-10 rounded-sm border text-[13px] font-semibold transition-colors ${
+              className={`min-h-11 rounded-sm border px-2 py-2 text-[13px] font-semibold leading-tight transition-colors ${
                 category === key
                   ? "border-secondary bg-rose-mist text-primary"
                   : "border-outline bg-surface text-on-surface-variant hover:bg-surface-variant"
@@ -192,6 +235,26 @@ export function ReportForm({
             </button>
           ))}
         </div>
+
+        {(category === "deal" || category === "event") && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-1" role="group" aria-label="세부 혜택 유형">
+            {(category === "deal" ? DEAL_SUBTYPES : EVENT_SUBTYPES).map((sub) => (
+              <button
+                key={sub.value}
+                type="button"
+                aria-pressed={dealType === sub.value}
+                onClick={() => setDealType(sub.value)}
+                className={`h-8 rounded-xs border px-2.5 text-xs font-semibold transition-colors ${
+                  dealType === sub.value
+                    ? "border-secondary bg-rose-mist text-primary"
+                    : "border-outline bg-surface text-on-surface-variant hover:bg-surface-variant"
+                }`}
+              >
+                {sub.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 2. 작품 & 예매처 */}
@@ -293,9 +356,9 @@ export function ReportForm({
         )}
       </div>
 
-      {/* 4. 할인가 · 할인율 (할인 딜일 때) */}
+      {/* 4. 할인가 · 할인율 · 예매 마감일 (할인 딜일 때) */}
       {category === "deal" && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
             <label htmlFor="report-price" className="text-[13px] font-semibold text-on-surface">
               할인가 (원)
@@ -322,6 +385,18 @@ export function ReportForm({
               value={reportedDiscountRate}
               onChange={(e) => setReportedDiscountRate(e.target.value)}
               placeholder="예: 45"
+              className="h-10 rounded-sm border border-outline bg-surface-variant px-3 text-sm text-on-surface tabular-nums focus:border-secondary focus:bg-surface focus:outline-none"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="report-expires" className="text-[13px] font-semibold text-on-surface">
+              예매 마감일 (선택 · KST)
+            </label>
+            <input
+              id="report-expires"
+              type="date"
+              value={expiresDate}
+              onChange={(e) => setExpiresDate(e.target.value)}
               className="h-10 rounded-sm border border-outline bg-surface-variant px-3 text-sm text-on-surface tabular-nums focus:border-secondary focus:bg-surface focus:outline-none"
             />
           </div>
@@ -401,14 +476,18 @@ export function ReportForm({
         />
       </div>
 
-      {error && <p className="text-xs font-semibold text-urgent">{error}</p>}
+      {error && (
+        <p role="alert" className="rounded-sm border border-urgent bg-urgent-wash px-3 py-2 text-xs font-semibold text-urgent">
+          {error}
+        </p>
+      )}
 
       {/* 7. Submit Row */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-outline pt-4">
+      <div className="flex flex-col-reverse gap-3 border-t border-outline pt-4 sm:flex-row sm:items-center sm:justify-between">
         <button
           type="button"
           onClick={saveDraftLocally}
-          className={`inline-flex h-10 w-32 items-center justify-center rounded-sm border text-[13px] font-semibold transition-colors ${
+          className={`inline-flex h-11 w-full items-center justify-center rounded-sm border text-[13px] font-semibold transition-colors sm:h-10 sm:w-32 ${
             draftSaved
               ? "border-secondary bg-rose-mist text-primary"
               : "border-outline bg-surface text-on-surface-variant hover:bg-surface-variant"
@@ -420,7 +499,7 @@ export function ReportForm({
         <button
           type="submit"
           disabled={busy}
-          className="inline-flex h-12 w-48 items-center justify-center rounded-sm bg-secondary text-[15px] font-semibold text-on-secondary shadow-cta transition-colors hover:bg-secondary-hover disabled:opacity-60"
+          className="inline-flex h-12 w-full items-center justify-center rounded-sm bg-secondary text-[15px] font-semibold text-on-secondary shadow-cta transition-colors hover:bg-secondary-hover disabled:opacity-60 sm:w-48"
         >
           {busy ? "등록 중..." : "제보 등록하기"}
         </button>

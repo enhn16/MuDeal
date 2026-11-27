@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, like } from "drizzle-orm";
 import type { AppDb } from "@/db/client";
 import {
   actors,
@@ -12,15 +12,47 @@ import {
   type SeatGrade,
   type SubRegion,
 } from "@/db/schema";
-import { expandDateRange, extractDiscountDatesFromLabel, normalizeEventDates } from "@/lib/kst";
+import {
+  expandDateRange,
+  extractDiscountDatesFromLabel,
+  formatKstDate,
+  isExpired,
+  isValidIsoDate,
+  normalizeEventDates,
+  normalizeExpiresAtToUtcIso,
+} from "@/lib/kst";
 import { calcDiscountRate } from "@/lib/pricing";
-import { parseSafeExternalUrl } from "@/lib/url";
+import { normalizeExternalHttpsUrl } from "@/lib/url";
 import { recomputeShowPriceCache } from "@/server/modules/reports";
 import { classifyDiscountLabel, hasMeaningfulBenefit, isStatutoryDiscount } from "./benefit-filter";
 import { isKidsMusical } from "./kids-filter";
 import { normalizeTitle, parseChannelLinks, type ChannelLinks } from "./kopis";
 
 export const AUTO_PUBLISH_CONFIDENCE = 0.85;
+const CHANNEL_FETCH_TIMEOUT_MS = 12_000;
+
+function fnv1aHex(input: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs = CHANNEL_FETCH_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error(`Fetch timeout (${timeoutMs}ms)`)), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** Strip region/promo brackets, English subtitles, and anniversary/production suffixes for robust cross-channel matching. */
 export function normalizeCoreTitle(raw: string): string {
@@ -75,6 +107,7 @@ export interface RawChannelDraft {
   synopsisImageUrl?: string | null;
   noticeImageUrls?: string[];
   castCredits?: CastCreditInput[];
+  forceDraft?: boolean;
 }
 
 export interface ChannelSyncShowHint {
@@ -83,10 +116,12 @@ export interface ChannelSyncShowHint {
   venueName: string;
   channelLinks: ChannelLinks;
   hasEnrichedCast: boolean;
+  lastSyncedAt?: string | null;
 }
 
 export interface ChannelSyncContext {
   shows: ChannelSyncShowHint[];
+  fetchedProductKeyPrefixes?: Set<string>;
 }
 
 export interface ChannelSyncAdapter {
@@ -105,6 +140,24 @@ export interface ShowMatchCandidate {
   endDate: string;
 }
 
+const GENERIC_VENUE_BASES = new Set([
+  "대학로",
+  "서울",
+  "부산",
+  "대구",
+  "인천",
+  "경기",
+  "대전",
+  "광주",
+  "극장",
+  "아트홀",
+  "소극장",
+  "대극장",
+  "중극장",
+  "공연장",
+  "씨어터",
+]);
+
 /** Normalize venue names across KOPIS ("예스24 스테이지(구. DCF...) (1관)") and ticketing sites ("예스24스테이지 1관"). */
 export function normalizeVenueName(raw: string | undefined | null): string {
   if (!raw) return "";
@@ -116,7 +169,19 @@ export function normalizeVenueName(raw: string | undefined | null): string {
 }
 
 function venueBaseName(raw: string | undefined | null): string {
-  return normalizeVenueName(raw).replace(/(?:\d+관|대극장|중극장|소극장|스콘\d*관|페이코홀|연강홀|우리은행홀|신한카드홀|드림\d*관|아트홀|씨어터홀).*$/, "");
+  const base = normalizeVenueName(raw).replace(
+    /(?:\d+관|대극장|중극장|소극장|스콘\d*관|페이코홀|연강홀|우리은행홀|신한카드홀|드림\d*관|아트홀|씨어터홀).*$/,
+    "",
+  );
+  if (base.length < 3 || GENERIC_VENUE_BASES.has(base)) return "";
+  return base;
+}
+
+function isSafePartialTitleMatch(a: string, b: string): boolean {
+  if (a.length < 2 || b.length < 2) return false;
+  if (!a.includes(b) && !b.includes(a)) return false;
+  const ratio = Math.min(a.length, b.length) / Math.max(a.length, b.length);
+  return ratio >= 0.45;
 }
 
 export interface ShowMatchResult {
@@ -139,6 +204,8 @@ export function matchShowWithConfidence(
   const scored: Array<{ cand: ShowMatchCandidate; confidence: number }> = [];
   const venueNorm = normalizeVenueName(item.venueName);
   const venueBase = venueBaseName(item.venueName);
+  const hasVenueHint = Boolean(venueNorm);
+  const hasPlaceHint = Boolean(item.subRegionHint || item.regionHint || hasVenueHint);
 
   for (const c of candidates) {
     const cCore = normalizeCoreTitle(c.normalizedTitle);
@@ -146,39 +213,43 @@ export function matchShowWithConfidence(
       (Boolean(norm) && c.normalizedTitle === norm) || (Boolean(core) && Boolean(cCore) && cCore === core);
     const partialTitle =
       !exactTitle &&
-      ((Boolean(norm) && (c.normalizedTitle.includes(norm) || norm.includes(c.normalizedTitle))) ||
-        (Boolean(core) && core.length >= 2 && Boolean(cCore) && (cCore.includes(core) || core.includes(cCore))));
+      (isSafePartialTitleMatch(c.normalizedTitle, norm) || isSafePartialTitleMatch(cCore, core));
 
     if (!exactTitle && !partialTitle) continue;
 
-    // Factor 2: region or venue similarity (robust to KOPIS "(구. ...)" and "(1관)" formatting)
+    // Factor 2: region or venue similarity (if venueName is given, do NOT override venue mismatch with broad regionHint)
     let placeMatched = false;
-    const hasPlaceHint = Boolean(item.subRegionHint || item.regionHint || venueNorm);
+    let venueOk = false;
     if (hasPlaceHint) {
       const subOk = item.subRegionHint ? c.subRegion === item.subRegionHint : false;
       const regOk = item.regionHint ? c.region.includes(item.regionHint) : false;
       const candVenueNorm = normalizeVenueName(c.venueName);
       const candVenueBase = venueBaseName(c.venueName);
-      const venueOk =
+      venueOk =
         (Boolean(venueNorm) &&
           Boolean(candVenueNorm) &&
           (candVenueNorm.includes(venueNorm) || venueNorm.includes(candVenueNorm))) ||
-        (venueBase.length >= 3 &&
-          candVenueBase.length >= 3 &&
+        (Boolean(venueBase) &&
+          Boolean(candVenueBase) &&
           (candVenueBase.includes(venueBase) || venueBase.includes(candVenueBase)));
-      placeMatched = subOk || regOk || venueOk;
+      placeMatched = hasVenueHint ? venueOk : subOk || regOk;
       if (!placeMatched) continue;
     }
 
-    // Factor 3: date period overlap (if dates provided)
-    if (item.startDate && c.endDate < item.startDate) continue;
-    if (item.endDate && c.startDate > item.endDate) continue;
+    // Factor 3: date period overlap (if valid ISO dates provided)
+    if (item.startDate && isValidIsoDate(item.startDate) && c.endDate < item.startDate) continue;
+    if (item.endDate && isValidIsoDate(item.endDate) && c.startDate > item.endDate) continue;
 
+    // Confidence gates:
+    // - No place hint -> cap at 0.80 (never auto-publish)
+    // - Partial title -> allow 0.88 ONLY with venueOk; broad regionHint alone stays at 0.72
     const confidence = exactTitle
-      ? placeMatched
-        ? 0.98
-        : 0.9
-      : placeMatched
+      ? hasPlaceHint
+        ? venueOk
+          ? 0.98
+          : 0.92
+        : 0.8
+      : venueOk
         ? 0.88
         : 0.72;
     scored.push({ cand: c, confidence });
@@ -235,9 +306,7 @@ async function upsertEnrichedActors(db: AppDb, showId: number, credits: CastCred
     const cleanName = credit.name.trim();
     if (cleanName.length < 2 || cleanName.length > 25) continue;
     const norm = cleanName.replace(/\s+/g, "").toLowerCase();
-    const safePhoto = credit.profileImageUrl
-      ? parseSafeExternalUrl(credit.profileImageUrl.replace(/^http:\/\//, "https://"))
-      : null;
+    const safePhoto = normalizeExternalHttpsUrl(credit.profileImageUrl);
 
     let actorId: number | null = null;
     if (credit.externalPlaydbId) {
@@ -336,6 +405,12 @@ async function upsertEnrichedActors(db: AppDb, showId: number, credits: CastCred
   }
 }
 
+const CHANNEL_NAME_BY_SOURCE: Record<string, string> = {
+  NOL: "NOL티켓",
+  YES24: "YES24티켓",
+  LTICKET: "엘티켓",
+};
+
 /** Isolated adapter execution: auto-publishes high-confidence matches as ACTIVE, queues ambiguous ones as DRAFT, respects admin_locked=1. */
 export async function runChannelAdapter(
   db: AppDb,
@@ -355,7 +430,8 @@ export async function runChannelAdapter(
     .returning({ id: syncRuns.id });
 
   try {
-    const [candidates, enrichedCastRows] = await Promise.all([
+    const channelLabel = CHANNEL_NAME_BY_SOURCE[adapter.sourceName];
+    const [candidates, enrichedCastRows, syncedDealRows] = await Promise.all([
       db
         .select({
           id: shows.id,
@@ -376,6 +452,12 @@ export async function runChannelAdapter(
       db
         .select({ showId: showActors.showId, sourceType: showActors.sourceType })
         .from(showActors),
+      channelLabel
+        ? db
+            .select({ showId: deals.showId, lastVerifiedAt: deals.lastVerifiedAt })
+            .from(deals)
+            .where(and(eq(deals.sourceType, "SYNC_APPROVED"), eq(deals.channelName, channelLabel)))
+        : Promise.resolve([] as Array<{ showId: number | null; lastVerifiedAt: string }>),
     ]);
 
     const enrichedCastShows = new Set(
@@ -384,16 +466,28 @@ export async function runChannelAdapter(
         .map((r) => r.showId),
     );
 
+    const lastSyncedByShowId = new Map<number, string>();
+    for (const r of syncedDealRows) {
+      if (r.showId === null) continue;
+      const prev = lastSyncedByShowId.get(r.showId);
+      if (!prev || r.lastVerifiedAt > prev) {
+        lastSyncedByShowId.set(r.showId, r.lastVerifiedAt);
+      }
+    }
+
+    const activeCandidates = candidates.filter((c) => c.status !== "ENDED");
+    const fetchedProductKeyPrefixes = new Set<string>();
+
     const ctx: ChannelSyncContext = {
-      shows: candidates
-        .filter((c) => c.status !== "ENDED")
-        .map((c) => ({
-          id: c.id,
-          title: c.title,
-          venueName: c.venueName,
-          channelLinks: parseChannelLinks(c.channelLinksJson),
-          hasEnrichedCast: enrichedCastShows.has(c.id),
-        })),
+      shows: activeCandidates.map((c) => ({
+        id: c.id,
+        title: c.title,
+        venueName: c.venueName,
+        channelLinks: parseChannelLinks(c.channelLinksJson),
+        hasEnrichedCast: enrichedCastShows.has(c.id),
+        lastSyncedAt: lastSyncedByShowId.get(c.id) ?? null,
+      })),
+      fetchedProductKeyPrefixes,
     };
 
     const rawItems = await adapter.fetchDrafts(ctx);
@@ -404,7 +498,8 @@ export async function runChannelAdapter(
       candidates.map((c) => [c.id, parseChannelLinks(c.channelLinksJson)]),
     );
 
-    const matchCandidates: ShowMatchCandidate[] = candidates.map((c) => ({
+    // Exclude ENDED shows from matching to prevent stale/ended-season collisions
+    const matchCandidates: ShowMatchCandidate[] = activeCandidates.map((c) => ({
       id: c.id,
       kopisId: c.kopisId,
       normalizedTitle: normalizeCoreTitle(c.title) || c.normalizedTitle,
@@ -419,33 +514,36 @@ export async function runChannelAdapter(
     let draftCount = 0;
     const touchedShowIds = new Set<number>();
     const castEnrichedThisRun = new Set<string>();
+    const seenExternalKeys = new Set<string>();
     const nowIso = now.toISOString();
+    const todayKst = formatKstDate(now);
 
     for (const item of rawItems) {
       if (isKidsMusical(item.showTitle, item.venueName)) continue;
-      const safeUrl = parseSafeExternalUrl(item.externalUrl);
+      const safeUrl = normalizeExternalHttpsUrl(item.externalUrl);
       if (!safeUrl) continue;
 
       let matchedShowId: number | null = item.directShowId ?? null;
-      let shouldAutoPublish = Boolean(matchedShowId);
+      let isHighConfidenceMatch = Boolean(matchedShowId);
       if (!matchedShowId) {
         const match = matchShowWithConfidence(matchCandidates, item);
         matchedShowId = match?.showId ?? null;
-        shouldAutoPublish = Boolean(match && match.confidence >= AUTO_PUBLISH_CONFIDENCE);
+        isHighConfidenceMatch = Boolean(match && match.confidence >= AUTO_PUBLISH_CONFIDENCE);
       }
+      const shouldAutoPublish = Boolean(matchedShowId) && isHighConfidenceMatch && !item.forceDraft;
 
-      // Backfill missing show poster, synopsis intro image, or channel product link
-      if (matchedShowId) {
+      // Backfill show metadata, channel links, and cast ONLY on confirmed high-confidence auto-publish matches
+      if (matchedShowId && shouldAutoPublish) {
         const showPatch: Partial<typeof shows.$inferInsert> = {};
         if (item.posterUrl && !posterByShowId.get(matchedShowId)) {
-          const safePoster = parseSafeExternalUrl(item.posterUrl);
+          const safePoster = normalizeExternalHttpsUrl(item.posterUrl);
           if (safePoster) {
             showPatch.posterUrl = safePoster;
             posterByShowId.set(matchedShowId, safePoster);
           }
         }
         if (item.synopsisImageUrl && !synopsisImgByShowId.get(matchedShowId)) {
-          const safeSyn = parseSafeExternalUrl(item.synopsisImageUrl);
+          const safeSyn = normalizeExternalHttpsUrl(item.synopsisImageUrl);
           if (safeSyn) {
             showPatch.synopsisImageUrl = safeSyn;
             synopsisImgByShowId.set(matchedShowId, safeSyn);
@@ -503,7 +601,18 @@ export async function runChannelAdapter(
         conditionSummary: item.conditionSummary ?? null,
       });
 
-      if (meaningful) {
+      const validEventDates = (item.eventDates ?? []).filter(isValidIsoDate).sort();
+      const latestEventDate = validEventDates.at(-1) ?? null;
+      const normalizedItemExpiresAt = normalizeExpiresAtToUtcIso(item.expiresAt);
+      const effectiveExpiresAt =
+        normalizedItemExpiresAt ?? (latestEventDate ? normalizeExpiresAtToUtcIso(latestEventDate) : null);
+
+      const alreadyEnded =
+        isExpired(effectiveExpiresAt, now) || (Boolean(latestEventDate) && Boolean(todayKst) && latestEventDate! < todayKst);
+
+      if (meaningful && !alreadyEnded) {
+        seenExternalKeys.add(item.externalKey);
+
         const [existing] = await db
           .select({
             id: deals.id,
@@ -518,10 +627,10 @@ export async function runChannelAdapter(
           .where(eq(deals.externalKey, item.externalKey))
           .limit(1);
 
-        // BP-SYNC-002-3: never overwrite admin_locked=1 deals
-        if (existing?.adminLocked !== 1) {
+        // BP-SYNC-002-3: never overwrite admin_locked=1 or admin-rejected DISCARDED/HIDDEN deals
+        if (existing?.adminLocked !== 1 && existing?.status !== "DISCARDED" && existing?.status !== "HIDDEN") {
           const tagsJson = item.conditionTags?.length ? JSON.stringify(item.conditionTags) : null;
-          const itemEventDatesJson = item.eventDates?.length ? JSON.stringify(item.eventDates) : null;
+          const itemEventDatesJson = validEventDates.length ? JSON.stringify(validEventDates) : null;
           if (!existing) {
             await db.insert(deals).values({
               showId: matchedShowId,
@@ -538,7 +647,7 @@ export async function runChannelAdapter(
               eventDatesJson: itemEventDatesJson,
               externalUrl: safeUrl,
               externalKey: item.externalKey,
-              expiresAt: item.expiresAt ?? null,
+              expiresAt: effectiveExpiresAt,
               status: shouldAutoPublish ? "ACTIVE" : "DRAFT",
               sourceType: "SYNC_APPROVED",
               lastVerifiedAt: nowIso,
@@ -566,7 +675,7 @@ export async function runChannelAdapter(
                 conditionSummary: item.conditionSummary ?? null,
                 opensAt: item.opensAt ?? existing.opensAt,
                 eventDatesJson: itemEventDatesJson ?? existing.eventDatesJson,
-                expiresAt: item.expiresAt ?? existing.expiresAt,
+                expiresAt: effectiveExpiresAt ?? existing.expiresAt,
                 status: nextStatus,
                 lastVerifiedAt: nowIso,
                 updatedAt: nowIso,
@@ -582,7 +691,7 @@ export async function runChannelAdapter(
 
       // Queue new notice image URLs for Vision/OCR (unique imageUrl prevents duplicate calls)
       for (const rawImg of item.noticeImageUrls ?? []) {
-        const safeImg = parseSafeExternalUrl(rawImg);
+        const safeImg = normalizeExternalHttpsUrl(rawImg);
         if (!safeImg) continue;
         await db
           .insert(ocrImageJobs)
@@ -597,8 +706,36 @@ export async function runChannelAdapter(
       }
     }
 
+    // Expire previously SYNC_APPROVED ACTIVE (adminLocked=0) deals that vanished from successfully fetched products
+    for (const prefix of fetchedProductKeyPrefixes) {
+      const existingPrefixDeals = await db
+        .select({
+          id: deals.id,
+          showId: deals.showId,
+          externalKey: deals.externalKey,
+        })
+        .from(deals)
+        .where(
+          and(
+            eq(deals.sourceType, "SYNC_APPROVED"),
+            eq(deals.status, "ACTIVE"),
+            eq(deals.adminLocked, 0),
+            like(deals.externalKey, `${prefix}%`),
+          ),
+        );
+      for (const row of existingPrefixDeals) {
+        if (row.externalKey && !seenExternalKeys.has(row.externalKey)) {
+          await db
+            .update(deals)
+            .set({ status: "EXPIRED", updatedAt: nowIso })
+            .where(eq(deals.id, row.id));
+          if (row.showId !== null) touchedShowIds.add(row.showId);
+        }
+      }
+    }
+
     for (const sid of touchedShowIds) {
-      await recomputeShowPriceCache(db, sid);
+      await recomputeShowPriceCache(db, sid, now);
     }
 
     await db
@@ -661,16 +798,44 @@ export function normalizeSeatGrade(raw: string | undefined | null): SeatGrade {
   return "ALL";
 }
 
-function kstDateTimeToIso(raw: string | null | undefined): string | null {
+function normalizeIsoDateOnly(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const trimmed = raw.trim();
-  if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}$/.test(trimmed)) {
-    return new Date(`${trimmed.replace(" ", "T")}+09:00`).toISOString();
+  const compact = /^(\d{4})(\d{2})(\d{2})$/.exec(trimmed);
+  const candidate = compact
+    ? `${compact[1]}-${compact[2]}-${compact[3]}`
+    : trimmed.replace(/[./]/g, "-");
+  return isValidIsoDate(candidate) ? candidate : null;
+}
+
+export function kstDateTimeToIso(raw: string | null | undefined, bound: "start" | "end" = "end"): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  const dateOnly = normalizeIsoDateOnly(trimmed);
+  if (dateOnly) {
+    const suffix = bound === "start" ? "T00:00:00+09:00" : "T23:59:59+09:00";
+    const dt = new Date(`${dateOnly}${suffix}`);
+    return Number.isNaN(dt.getTime()) ? null : dt.toISOString();
   }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-    return new Date(`${trimmed}T23:59:59+09:00`).toISOString();
+
+  // Normalize YYYY.MM.DD HH:MM(:SS) or YYYY/MM/DD HH:MM(:SS) or YYYYMMDDHHMMSS
+  const dotted = /^(\d{4})[./-](\d{2})[./-](\d{2})([T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})?)$/i.exec(
+    trimmed,
+  );
+  if (dotted) {
+    return normalizeExpiresAtToUtcIso(`${dotted[1]}-${dotted[2]}-${dotted[3]}${dotted[4]}`);
   }
-  return null;
+
+  const compactDt = /^(\d{4})(\d{2})(\d{2})[T ]?(\d{2})(\d{2})(\d{2})?$/.exec(trimmed);
+  if (compactDt) {
+    return normalizeExpiresAtToUtcIso(
+      `${compactDt[1]}-${compactDt[2]}-${compactDt[3]}T${compactDt[4]}:${compactDt[5]}:${compactDt[6] ?? "00"}`,
+    );
+  }
+
+  return normalizeExpiresAtToUtcIso(trimmed);
 }
 
 function extractNextFStream(html: string): string {
@@ -798,10 +963,10 @@ export function parseNolMusicalHtml(html: string): Array<{
       const basePrice = parseKrwDigits(price?.originPrice);
       const salePrice = parseKrwDigits(price?.discountPrice);
       const badges = (it.benefitBadges ?? []).map((b) => b.text?.trim() ?? "").filter(Boolean);
-      const webUrl = it.action?.web?.startsWith("https://")
-        ? it.action.web
-        : `https://nol.yanolja.com/ticket/products/${goodsCode}`;
-      const hasDiscount = salePrice !== null || widgetTitle.includes("할인");
+      const webUrl =
+        normalizeExternalHttpsUrl(it.action?.web, "https://nol.yanolja.com") ??
+        `https://nol.yanolja.com/ticket/products/${goodsCode}`;
+      const hasDiscount = (salePrice !== null && (basePrice === null || salePrice < basePrice)) || widgetTitle.includes("할인");
 
       const prev = byGoodsCode.get(goodsCode);
       if (prev && prev.hasDiscount && !hasDiscount) continue;
@@ -814,7 +979,7 @@ export function parseNolMusicalHtml(html: string): Array<{
         salePrice: salePrice ?? prev?.salePrice ?? null,
         badges: badges.length ? badges : (prev?.badges ?? []),
         url: webUrl.includes("/ticket/") ? webUrl : (prev?.url ?? webUrl),
-        thumbnail: it.thumbnail?.startsWith("https://") ? it.thumbnail : (prev?.thumbnail ?? null),
+        thumbnail: normalizeExternalHttpsUrl(it.thumbnail, "https://nol.yanolja.com") ?? prev?.thumbnail ?? null,
         hasDiscount: hasDiscount || Boolean(prev?.hasDiscount),
       });
     }
@@ -855,9 +1020,12 @@ export function parseNolPromoBanners(html: string): Array<{
 export function parseNolNoticeImages(detailHtml: string): string[] {
   const matches =
     detailHtml.match(
-      /https?:\/\/ticketimage\.interpark\.com\/(?:Play\/ITM\/Data\/Modify\/|\d{8,}20\d{2}\/)[^"'\\<\s]+?\.(?:jpg|jpeg|png|webp)/gi,
+      /(?:https?:)?\/\/ticketimage\.interpark\.com\/(?:Play\/ITM\/Data\/Modify\/|\d{8,}20\d{2}\/)[^"'\\<\s]+?\.(?:jpg|jpeg|png|webp)/gi,
     ) ?? [];
-  return Array.from(new Set(matches.map((u) => u.replace(/^http:\/\//, "https://")))).slice(0, 3);
+  const normalized = matches
+    .map((u) => normalizeExternalHttpsUrl(u))
+    .filter((u): u is string => Boolean(u));
+  return Array.from(new Set(normalized)).slice(0, 3);
 }
 
 export interface NolParsedPriceRow {
@@ -883,6 +1051,7 @@ export interface NolProductDetailParsed {
   lotteryApplyEnd: string | null;
   lotteryAnnounce: string | null;
   discounts: NolParsedPriceRow[];
+  hasPricesTable?: boolean;
   castCredits: CastCreditInput[];
   noticeImageUrls: string[];
   synopsisImageUrl: string | null;
@@ -904,44 +1073,43 @@ export function parseNolProductDetailHtml(html: string, goodsCode: string): NolP
   let lotteryApplyEnd: string | null = null;
   let lotteryAnnounce: string | null = null;
   let synopsisImageUrl: string | null = null;
+  let hasPricesTable = false;
 
-  const gdIdx = combined.indexOf('{"goodsDetail":');
-  if (gdIdx !== -1) {
-    const raw = extractBalancedJson(combined, gdIdx);
+  const gdKey = '"goodsDetail":{';
+  const gdKeyIdx = combined.indexOf(gdKey);
+  if (gdKeyIdx !== -1) {
+    const raw = extractBalancedJson(combined, gdKeyIdx + gdKey.length - 1);
     if (raw) {
       try {
-        const obj = JSON.parse(raw) as {
-          goodsDetail?: {
-            goodsName?: string;
-            placeName?: string;
-            playStartDate?: string;
-            playEndDate?: string;
-            bookingEndTime?: string;
-            posterImageUrl?: string;
-            detail?: {
-              contentInfo?: string;
-              bookingEndTime?: string | null;
-              lotteryApplyStartDateTime?: string | null;
-              lotteryApplyEndDateTime?: string | null;
-              lotteryAnnounceDateTime?: string | null;
-            };
+        const gd = JSON.parse(raw) as {
+          goodsName?: string;
+          placeName?: string;
+          playStartDate?: string;
+          playEndDate?: string;
+          bookingEndTime?: string;
+          posterImageUrl?: string;
+          detail?: {
+            contentInfo?: string;
+            bookingEndTime?: string | null;
+            lotteryApplyStartDateTime?: string | null;
+            lotteryApplyEndDateTime?: string | null;
+            lotteryAnnounceDateTime?: string | null;
           };
         };
-        const gd = obj.goodsDetail;
         if (gd) {
           title = gd.goodsName?.trim() || null;
           venueName = gd.placeName?.trim() || null;
-          startDate = gd.playStartDate?.trim() || null;
-          endDate = gd.playEndDate?.trim() || null;
-          bookingEndTime = kstDateTimeToIso(gd.bookingEndTime ?? gd.detail?.bookingEndTime);
-          posterUrl = gd.posterImageUrl?.replace(/^http:\/\//, "https://") || null;
-          lotteryApplyStart = kstDateTimeToIso(gd.detail?.lotteryApplyStartDateTime);
-          lotteryApplyEnd = kstDateTimeToIso(gd.detail?.lotteryApplyEndDateTime);
-          lotteryAnnounce = kstDateTimeToIso(gd.detail?.lotteryAnnounceDateTime);
-          const contentImg = /src=["'](https?:\/\/[^"']+\.(?:jpg|jpeg|png|webp))["']/i.exec(
+          startDate = normalizeIsoDateOnly(gd.playStartDate);
+          endDate = normalizeIsoDateOnly(gd.playEndDate);
+          bookingEndTime = kstDateTimeToIso(gd.bookingEndTime ?? gd.detail?.bookingEndTime, "end");
+          posterUrl = normalizeExternalHttpsUrl(gd.posterImageUrl, "https://nol.yanolja.com");
+          lotteryApplyStart = kstDateTimeToIso(gd.detail?.lotteryApplyStartDateTime, "start");
+          lotteryApplyEnd = kstDateTimeToIso(gd.detail?.lotteryApplyEndDateTime, "end");
+          lotteryAnnounce = kstDateTimeToIso(gd.detail?.lotteryAnnounceDateTime, "end");
+          const contentImg = /src=["']((?:https?:)?\/\/[^"']+\.(?:jpg|jpeg|png|webp))["']/i.exec(
             gd.detail?.contentInfo ?? "",
           )?.[1];
-          if (contentImg) synopsisImageUrl = contentImg.replace(/^http:\/\//, "https://");
+          if (contentImg) synopsisImageUrl = normalizeExternalHttpsUrl(contentImg);
         }
       } catch {
         // Ignore malformed goodsDetail chunk
@@ -949,31 +1117,31 @@ export function parseNolProductDetailHtml(html: string, goodsCode: string): NolP
     }
   }
 
-  // Parse prices.all (full "가격 전체보기" table!)
+  // Parse prices.all (full "가격 전체보기" table!) resilient to key order inside prices object
   const discounts: NolParsedPriceRow[] = [];
-  const pIdx = combined.indexOf('{"prices":{"all":');
-  if (pIdx !== -1) {
-    const raw = extractBalancedJson(combined, pIdx);
+  const pKey = '"prices":{';
+  const pKeyIdx = combined.indexOf(pKey);
+  if (pKeyIdx !== -1) {
+    const raw = extractBalancedJson(combined, pKeyIdx + pKey.length - 1);
     if (raw) {
       try {
-        const obj = JSON.parse(raw) as {
-          prices?: {
-            all?: Array<{
-              seatGrade?: string;
-              priceGrade?: string;
-              seatGradeName?: string;
-              priceGradeName?: string;
-              salesPrice?: number;
-              regularPrice?: number;
-              priceType?: string;
-              priceStartDate?: string;
-              priceEndDate?: string;
-              discountStartDate?: string;
-              discountEndDate?: string;
-            }>;
-          };
+        const pricesObj = JSON.parse(raw) as {
+          all?: Array<{
+            seatGrade?: string;
+            priceGrade?: string;
+            seatGradeName?: string;
+            priceGradeName?: string;
+            salesPrice?: number;
+            regularPrice?: number;
+            priceType?: string;
+            priceStartDate?: string;
+            priceEndDate?: string;
+            discountStartDate?: string;
+            discountEndDate?: string;
+          }>;
         };
-        const allRows = obj.prices?.all ?? [];
+        const allRows = pricesObj.all ?? [];
+        if (Array.isArray(pricesObj.all)) hasPricesTable = true;
         const basicPriceByGrade = new Map<string, number>();
         for (const row of allRows) {
           if (row.priceType === "basic" && row.seatGradeName && typeof row.salesPrice === "number" && row.salesPrice > 0) {
@@ -986,16 +1154,18 @@ export function parseNolProductDetailHtml(html: string, goodsCode: string): NolP
           const salePrice = typeof row.salesPrice === "number" && row.salesPrice > 0 ? row.salesPrice : null;
           if (!label || salePrice === null) continue;
           const gradeName = (row.seatGradeName ?? "전석").trim();
-          const basePrice = basicPriceByGrade.get(gradeName) ?? null;
+          const regularFallback =
+            typeof row.regularPrice === "number" && row.regularPrice > salePrice ? row.regularPrice : null;
+          const basePrice = basicPriceByGrade.get(gradeName) ?? regularFallback;
           discounts.push({
             seatGrade: normalizeSeatGrade(gradeName),
             seatGradeName: gradeName,
-            priceGrade: row.priceGrade ?? `${discounts.length + 1}`,
+            priceGrade: row.priceGrade?.trim() || fnv1aHex(`${gradeName}|${label}`),
             priceGradeName: label,
             basePrice,
             salePrice,
-            discountStartDate: kstDateTimeToIso(row.priceStartDate || row.discountStartDate),
-            discountEndDate: kstDateTimeToIso(row.priceEndDate || row.discountEndDate),
+            discountStartDate: kstDateTimeToIso(row.priceStartDate || row.discountStartDate, "start"),
+            discountEndDate: kstDateTimeToIso(row.priceEndDate || row.discountEndDate, "end"),
           });
         }
       } catch {
@@ -1026,7 +1196,7 @@ export function parseNolProductDetailHtml(html: string, goodsCode: string): NolP
           const dedup = `${c.manNo ?? name}`;
           if (seen.has(dedup)) continue;
           seen.add(dedup);
-          const photo = (c.manSmallImageUrl || c.manLargeImageUrl || "").replace(/^http:\/\//, "https://") || null;
+          const photo = normalizeExternalHttpsUrl(c.manSmallImageUrl || c.manLargeImageUrl);
           castCredits.push({
             name,
             roleName: c.characterName?.trim() || null,
@@ -1053,24 +1223,32 @@ export function parseNolProductDetailHtml(html: string, goodsCode: string): NolP
     lotteryApplyEnd,
     lotteryAnnounce,
     discounts,
+    hasPricesTable,
     castCredits,
     noticeImageUrls: parseNolNoticeImages(combined),
     synopsisImageUrl,
   };
 }
 
+function compareQueueStaleness(a?: string | null, b?: string | null): number {
+  if (!a && !b) return 0;
+  if (!a) return -1;
+  if (!b) return 1;
+  return a.localeCompare(b);
+}
+
 /** Tier-1 NOL Ticket adapter: full prices.all + lottery/SugarDay/timesale banners + structured castCredits + notice OCR. */
 export const nolAdapter: ChannelSyncAdapter = {
   sourceName: "NOL",
   async fetchDrafts(ctx) {
-    const genreRes = await fetch("https://nol.yanolja.com/ticket/genre/musical", { headers: BROWSER_HEADERS });
+    const genreRes = await fetchWithTimeout("https://nol.yanolja.com/ticket/genre/musical", { headers: BROWSER_HEADERS });
     if (!genreRes.ok) throw new Error(`NOL genre HTTP ${genreRes.status}`);
     const genreHtml = await genreRes.text();
 
     const genreItems = parseNolMusicalHtml(genreHtml).filter((it) => !isKidsMusical(it.title, it.venueName));
     const promoBanners = parseNolPromoBanners(genreHtml);
 
-    // Build prioritized queue of NOL goodsCodes (promo banners -> KOPIS-linked shows -> genre items)
+    // Build prioritized queue of NOL goodsCodes (promo banners -> KOPIS-linked shows -> genre items), round-robin by staleness
     type QueueEntry = {
       goodsCode: string;
       directShowId?: number;
@@ -1080,6 +1258,7 @@ export const nolAdapter: ChannelSyncAdapter = {
       promoKind?: "LOTTERY" | "SPECIAL_DAY" | "TIMESALE";
       promoAlt?: string;
       priority: number;
+      lastSyncedAt?: string | null;
     };
     const queue = new Map<string, QueueEntry>();
 
@@ -1090,6 +1269,7 @@ export const nolAdapter: ChannelSyncAdapter = {
         promoKind: b.kind,
         promoAlt: b.alt,
         priority: 3,
+        lastSyncedAt: null,
       });
     }
 
@@ -1099,6 +1279,7 @@ export const nolAdapter: ChannelSyncAdapter = {
       const existing = queue.get(gc);
       if (existing) {
         existing.directShowId = s.id;
+        existing.lastSyncedAt = s.lastSyncedAt ?? null;
       } else {
         queue.set(gc, {
           goodsCode: gc,
@@ -1106,6 +1287,7 @@ export const nolAdapter: ChannelSyncAdapter = {
           fallbackTitle: s.title,
           fallbackVenue: s.venueName,
           priority: s.hasEnrichedCast ? 1 : 2,
+          lastSyncedAt: s.lastSyncedAt ?? null,
         });
       }
     }
@@ -1118,28 +1300,38 @@ export const nolAdapter: ChannelSyncAdapter = {
           fallbackVenue: it.venueName,
           fallbackRegion: it.regionHint,
           priority: it.hasDiscount ? 2 : 0,
+          lastSyncedAt: null,
         });
       }
     }
 
-    const sortedQueue = Array.from(queue.values()).sort((a, b) => b.priority - a.priority);
+    const sortedQueue = Array.from(queue.values()).sort(
+      (a, b) => b.priority - a.priority || compareQueueStaleness(a.lastSyncedAt, b.lastSyncedAt),
+    );
     const drafts: RawChannelDraft[] = [];
 
-    // Fetch up to 12 product detail pages per run to fit comfortably in Cloudflare Workers subrequest budget
+    // Fetch up to 12 product detail pages per run to fit comfortably in Cloudflare Workers free 50-subrequest budget
     for (const target of sortedQueue.slice(0, 12)) {
       const productUrl = `https://nol.yanolja.com/ticket/products/${target.goodsCode}`;
       try {
-        const dRes = await fetch(productUrl, { headers: BROWSER_HEADERS });
+        const dRes = await fetchWithTimeout(productUrl, { headers: BROWSER_HEADERS });
         if (!dRes.ok) continue;
         const parsed = parseNolProductDetailHtml(await dRes.text(), target.goodsCode);
         const showTitle = parsed.title || target.fallbackTitle;
         if (isKidsMusical(showTitle, parsed.venueName ?? target.fallbackVenue)) continue;
 
         let emittedForProduct = false;
+        const isLotteryProduct = Boolean(parsed.lotteryApplyEnd) || target.promoKind === "LOTTERY";
 
-        // 1. Lottery product (e.g. ［로터리 티켓］)
-        if (parsed.lotteryApplyEnd || target.promoKind === "LOTTERY") {
-          const lowestLottery = parsed.discounts[0];
+        // 1. Lottery product (e.g. ［로터리 티켓］) — emit single deduplicated LOTTERY deal (do not duplicate via prices.all)
+        if (isLotteryProduct) {
+          const eligibleLotteryRows = parsed.discounts.filter(
+            (r) => !isStatutoryDiscount(r.priceGradeName),
+          );
+          const lowestLottery = eligibleLotteryRows.sort((a, b) => a.salePrice - b.salePrice)[0];
+          const announceKstMmDd = parsed.lotteryAnnounce
+            ? formatKstDate(new Date(parsed.lotteryAnnounce)).slice(5, 10)
+            : "";
           drafts.push({
             externalKey: `nol-lottery-${target.goodsCode}`,
             channelName: "NOL티켓",
@@ -1155,8 +1347,8 @@ export const nolAdapter: ChannelSyncAdapter = {
             salePrice: lowestLottery?.salePrice ?? null,
             isUnconditional: false,
             conditionTags: [],
-            conditionSummary: parsed.lotteryAnnounce
-              ? `NOL 로터리 티켓 추첨 (발표 ${parsed.lotteryAnnounce.slice(5, 10)})`
+            conditionSummary: announceKstMmDd
+              ? `NOL 로터리 티켓 추첨 (발표 ${announceKstMmDd})`
               : "NOL 로터리 티켓 추첨 응모",
             opensAt: parsed.lotteryApplyStart,
             expiresAt: parsed.lotteryApplyEnd,
@@ -1167,10 +1359,20 @@ export const nolAdapter: ChannelSyncAdapter = {
             castCredits: parsed.castCredits,
           });
           emittedForProduct = true;
+          continue;
         }
 
-        // 2. Every non-statutory discount row from prices.all
-        const extraHints = target.promoKind === "SPECIAL_DAY" ? [target.promoAlt ?? "슈가DAY"] : [];
+        if (parsed.hasPricesTable) {
+          ctx?.fetchedProductKeyPrefixes?.add(`nol-${target.goodsCode}-`);
+        }
+
+        // 2. Every non-statutory discount row from prices.all (pass promo keyword only, NOT show title)
+        const extraHints =
+          target.promoKind === "SPECIAL_DAY"
+            ? ["슈가DAY"]
+            : target.promoKind === "TIMESALE"
+              ? ["타임세일"]
+              : [];
         const isStandalonePromoDates =
           (target.promoKind === "SPECIAL_DAY" || (parsed.startDate && parsed.startDate === parsed.endDate)) &&
           parsed.startDate
@@ -1183,10 +1385,11 @@ export const nolAdapter: ChannelSyncAdapter = {
             showStartDate: parsed.startDate,
             showEndDate: parsed.endDate,
           });
-          // For special-day standalone goods (e.g. 슈가DAY), if basic row wasn't present, compute from label percent if possible
+          // Prefer basic/regularPrice; fallback to label % only when basic & regularPrice are unavailable
           let basePrice = row.basePrice;
           if (!basePrice) {
-            const pct = /(\d{1,2})\s*%/.exec(row.priceGradeName)?.[1];
+            const pctMatches = [...row.priceGradeName.matchAll(/(?<!\d)(\d{1,2})\s*%(?!\s*p)/gi)];
+            const pct = pctMatches.at(-1)?.[1];
             if (pct && Number(pct) > 0 && Number(pct) < 90) {
               basePrice = Math.round((row.salePrice / (1 - Number(pct) / 100)) / 100) * 100;
             }
@@ -1197,8 +1400,9 @@ export const nolAdapter: ChannelSyncAdapter = {
             row.discountEndDate ??
             labelDates.bookingExpiresAt ??
             (target.promoKind === "SPECIAL_DAY" ? parsed.bookingEndTime : null);
+          const gradeSlug = fnv1aHex(row.seatGradeName);
           drafts.push({
-            externalKey: `nol-${target.goodsCode}-${row.seatGrade}-${row.priceGrade}`,
+            externalKey: `nol-${target.goodsCode}-${row.seatGrade}-${gradeSlug}-${row.priceGrade}`,
             channelName: "NOL티켓",
             directShowId: target.directShowId,
             showTitle,
@@ -1265,26 +1469,38 @@ export interface Yes24GenreItem {
   posterUrl?: string | null;
 }
 
-/** Parse YES24 GenreList_Data.aspx HTML into musical items. */
+/** Parse YES24 GenreList_Data.aspx HTML into musical items (isolated per <a> card block). */
 export function parseYes24GenreListHtml(html: string): Yes24GenreItem[] {
   const out: Yes24GenreItem[] = [];
   const seen = new Set<string>();
-  const re =
-    /jsf_base_GoToPerfDetail\((\d+)\);'\s*title='([^']+)'[\s\S]*?(?:data-src|src)='([^']+)'[\s\S]*?<p class='list-b-tit2[^']*'>([^<]+)<\/p><p class='list-b-tit2[^']*'>([^<]+)<\/p>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null) {
-    const perfId = m[1];
+  const cardRe = /<a\b[^>]*jsf_base_GoToPerfDetail\((\d+)\)[^>]*>[\s\S]*?<\/a>/gi;
+  let cm: RegExpExecArray | null;
+  while ((cm = cardRe.exec(html)) !== null) {
+    const card = cm[0];
+    const perfId = cm[1];
     if (seen.has(perfId)) continue;
+    const titleMatch = /\btitle=(?:'([^']+)'|"([^"]+)")/i.exec(card);
+    const title = (titleMatch?.[1] ?? titleMatch?.[2] ?? "").trim();
+    if (!title) continue;
     seen.add(perfId);
-    const periodMatch = /(\d{4})\.(\d{2})\.(\d{2})\s*~\s*(\d{4})\.(\d{2})\.(\d{2})/.exec(m[4]);
-    const rawPoster = m[3]?.trim();
-    const posterUrl = rawPoster ? (rawPoster.startsWith("//") ? `https:${rawPoster}` : rawPoster) : null;
+
+    const imgMatch = /\b(?:data-src|src)=(?:'([^']+)'|"([^"]+)")/i.exec(card);
+    const rawPoster = (imgMatch?.[1] ?? imgMatch?.[2] ?? "").trim();
+    const posterUrl = normalizeExternalHttpsUrl(rawPoster, "https://ticket.yes24.com");
+
+    const pTexts = [...card.matchAll(/<p\b[^>]*class=(?:'[^']*list-b-tit2[^']*'|"[^"]*list-b-tit2[^"]*")[^>]*>([^<]+)<\/p>/gi)].map(
+      (x) => x[1].trim(),
+    );
+    const periodText = pTexts[0] ?? "";
+    const venueText = pTexts[1]?.trim();
+    const periodMatch = /(\d{4})\.(\d{2})\.(\d{2})\s*~\s*(\d{4})\.(\d{2})\.(\d{2})/.exec(periodText);
+
     out.push({
       perfId,
-      title: m[2].trim(),
+      title,
       startDate: periodMatch ? `${periodMatch[1]}-${periodMatch[2]}-${periodMatch[3]}` : undefined,
       endDate: periodMatch ? `${periodMatch[4]}-${periodMatch[5]}-${periodMatch[6]}` : undefined,
-      venueName: m[5].trim(),
+      venueName: venueText || undefined,
       posterUrl,
     });
   }
@@ -1299,41 +1515,82 @@ export interface Yes24PromoPriceRow {
   salePrice: number;
 }
 
+const YES24_BASE_LABEL_RE = /^(?:기본가|일반|정가|일반가|정상가)(?:\s*\([^)]*\))?$/;
+
 /** Parse YES24 popPerfPromotion.aspx ("가격 - 자세히") HTML table into all seat-grade × discount rows. */
 export function parseYes24PromotionHtml(html: string): Yes24PromoPriceRow[] {
   const out: Yes24PromoPriceRow[] = [];
   const tableRe = /<table[^>]*>([\s\S]*?)<\/table>/gi;
   let tm: RegExpExecArray | null;
   while ((tm = tableRe.exec(html)) !== null) {
-    const tableBody = tm[1];
-    const gradeRaw = /<th[^>]*>([\s\S]*?)<\/th>/i.exec(tableBody)?.[1]?.replace(/<[^>]+>/g, "").trim() ?? "전석";
-    const seatGrade = normalizeSeatGrade(gradeRaw);
+    // Strip <thead>...</thead> so column header <th> never pollutes seat grade context
+    const tableBody = tm[1].replace(/<thead[^>]*>[\s\S]*?<\/thead>/gi, "");
 
-    const rows: Array<{ label: string; price: number }> = [];
+    const gradeGroups: Array<{
+      gradeRaw: string;
+      seatGrade: SeatGrade;
+      rows: Array<{ label: string; price: number }>;
+    }> = [];
+    let currentGroup: {
+      gradeRaw: string;
+      seatGrade: SeatGrade;
+      rows: Array<{ label: string; price: number }>;
+    } | null = null;
+
     const trRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
     let rm: RegExpExecArray | null;
     while ((rm = trRe.exec(tableBody)) !== null) {
-      const tds = [...rm[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((x) =>
+      const trHtml = rm[1];
+      const ths = [...trHtml.matchAll(/<th[^>]*>([\s\S]*?)<\/th>/gi)].map((x) =>
         x[1].replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim(),
       );
+      const tds = [...trHtml.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((x) =>
+        x[1].replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim(),
+      );
+
+      // Skip pure header rows (no <td> cells, e.g. <tr><th>좌석등급</th><th>할인명</th><th>가격</th></tr>)
+      if (tds.length === 0) continue;
+
+      if (ths.length > 0 && ths[0] && !/^(?:좌석\s*등급|등급|할인\s*종류|구분)$/.test(ths[0])) {
+        const gradeRaw = ths[0];
+        currentGroup = {
+          gradeRaw,
+          seatGrade: normalizeSeatGrade(gradeRaw),
+          rows: [],
+        };
+        gradeGroups.push(currentGroup);
+      }
+
       if (tds.length < 2) continue;
       const label = tds[tds.length - 2];
       const price = parseKrwDigits(tds[tds.length - 1]);
-      if (label && price) rows.push({ label, price });
+      if (!label || !price) continue;
+
+      if (!currentGroup) {
+        currentGroup = { gradeRaw: "전석", seatGrade: "ALL", rows: [] };
+        gradeGroups.push(currentGroup);
+      }
+      currentGroup.rows.push({ label, price });
     }
 
-    const baseRow = rows.find((r) => r.label.includes("기본가") || r.label === "일반");
-    const basePrice = baseRow?.price ?? null;
+    for (const group of gradeGroups) {
+      const isBaseLabel = (label: string) => {
+        const clean = label.replace(/^\s*-\s*/, "").trim();
+        return YES24_BASE_LABEL_RE.test(clean) || clean === "기본가";
+      };
+      const baseRow = group.rows.find((r) => isBaseLabel(r.label));
+      const basePrice = baseRow?.price ?? null;
 
-    for (const row of rows) {
-      if (row.label.includes("기본가") || row.label === "일반") continue;
-      out.push({
-        seatGrade,
-        seatGradeName: gradeRaw,
-        basePrice,
-        label: row.label.replace(/^\s*-\s*/, "").trim(),
-        salePrice: row.price,
-      });
+      for (const row of group.rows) {
+        if (isBaseLabel(row.label)) continue;
+        out.push({
+          seatGrade: group.seatGrade,
+          seatGradeName: group.gradeRaw,
+          basePrice,
+          label: row.label.replace(/^\s*-\s*/, "").trim(),
+          salePrice: row.price,
+        });
+      }
     }
   }
   return out;
@@ -1365,6 +1622,20 @@ export function parseYes24PromotionIds(html: string): string[] {
   return Array.from(ids);
 }
 
+const YES24_NOTICE_NEGATIVE_RE = /불가|금지|취소|변경|판매\s*안내|MD\s*판매|유료\s*판매/i;
+const YES24_TICKET_OPEN_RE = /티켓\s*오픈|티켓오픈/i;
+const YES24_EXPLICIT_EVENT_PERK_RE = /싱어롱|커튼콜\s*데이|스페셜\s*커튼콜|포토카드\s*증정|특전\s*증정|YES24데이|예스24데이/i;
+
+export function classifyYes24NoticeTitle(title: string): DealType | null {
+  if (!title || YES24_NOTICE_NEGATIVE_RE.test(title)) return null;
+  if (YES24_TICKET_OPEN_RE.test(title) && !YES24_EXPLICIT_EVENT_PERK_RE.test(title)) return null;
+  if (title.includes("싱어롱")) return "SINGALONG";
+  if (title.includes("커튼콜")) return "CURTAIN_CALL";
+  if (title.includes("특전") || title.includes("포토카드") || title.includes("굿즈")) return "PERK_GOODS";
+  if (/YES24데이|예스24데이/i.test(title)) return "SPECIAL_DAY";
+  return null;
+}
+
 /** Tier-1 YES24 adapter: full popPerfPromotion prices + YES24데이/넵프라이즈/엔젤티켓 promos + cast + event notices. */
 export const yes24Adapter: ChannelSyncAdapter = {
   sourceName: "YES24",
@@ -1372,7 +1643,7 @@ export const yes24Adapter: ChannelSyncAdapter = {
     const out: RawChannelDraft[] = [];
 
     // 1. Musical genre list (active musicals)
-    const genreRes = await fetch(
+    const genreRes = await fetchWithTimeout(
       "https://ticket.yes24.com/New/Genre/Ajax/GenreList_Data.aspx?genre=15457&sort=3&area=&genretype=1&pCurPage=1&pPageSize=40",
       {
         headers: {
@@ -1389,19 +1660,24 @@ export const yes24Adapter: ChannelSyncAdapter = {
     // 2. Discover platform-specific promos (YES24데이, 넵프라이즈티켓, 엔젤티켓) from Events hub
     const specialPromoByPerfId = new Map<string, string>();
     try {
-      const evRes = await fetch("https://ticket.yes24.com/New/Events/Main.aspx", { headers: BROWSER_HEADERS });
+      const evRes = await fetchWithTimeout("https://ticket.yes24.com/New/Events/Main.aspx", {
+        headers: BROWSER_HEADERS,
+      });
       if (evRes.ok) {
         const promoIds = parseYes24PromotionIds(await evRes.text()).slice(0, 5);
         for (const promoId of promoIds) {
-          const pr = await fetch(`https://ticket.yes24.com/Pages/Events/HotEvent/PromotionInfo.aspx?id=${promoId}`, {
-            headers: BROWSER_HEADERS,
-          });
+          const pr = await fetchWithTimeout(
+            `https://ticket.yes24.com/Pages/Events/HotEvent/PromotionInfo.aspx?id=${promoId}`,
+            { headers: BROWSER_HEADERS },
+          );
           if (!pr.ok) continue;
           const pHtml = await pr.text();
           const ogTitle = /property=["']og:title["'][^>]*content=["']([^"']+)["']/i.exec(pHtml)?.[1] ?? "";
-          if (!/YES24데이|예스24데이|넵프라이즈|엔젤티켓|예스특가|타임세일/i.test(ogTitle)) continue;
-          for (const pm of pHtml.matchAll(/(?:\/Perf\/|IdPerf=|PerfDetail\()(\d{5})/gi)) {
-            if (!specialPromoByPerfId.has(pm[1])) specialPromoByPerfId.set(pm[1], ogTitle);
+          const promoKwMatch = /(YES24데이|예스24데이|넵프라이즈|엔젤티켓|예스특가|타임세일)/i.exec(ogTitle);
+          if (!promoKwMatch) continue;
+          const promoKeyword = promoKwMatch[1];
+          for (const pm of pHtml.matchAll(/(?:\/Perf\/|IdPerf=|PerfDetail\()(\d{4,7})(?!\d)/gi)) {
+            if (!specialPromoByPerfId.has(pm[1])) specialPromoByPerfId.set(pm[1], promoKeyword);
           }
         }
       }
@@ -1409,7 +1685,7 @@ export const yes24Adapter: ChannelSyncAdapter = {
       // Keep full price sync running even if events hub fails
     }
 
-    // 3. Build prioritized queue of YES24 perfIds (special promo -> KOPIS-linked shows -> genre list)
+    // 3. Build prioritized queue of YES24 perfIds (special promo -> KOPIS-linked shows -> genre list), round-robin by staleness
     type YQueue = {
       perfId: string;
       directShowId?: number;
@@ -1418,24 +1694,26 @@ export const yes24Adapter: ChannelSyncAdapter = {
       startDate?: string;
       endDate?: string;
       posterUrl?: string | null;
-      specialPromoTitle?: string;
+      specialPromoKeyword?: string;
       needsCast?: boolean;
       priority: number;
+      lastSyncedAt?: string | null;
     };
     const queue = new Map<string, YQueue>();
 
     for (const s of ctx?.shows ?? []) {
       const pid = s.channelLinks.yes24;
       if (!pid) continue;
-      const specialTitle = specialPromoByPerfId.get(pid);
+      const specialKw = specialPromoByPerfId.get(pid);
       queue.set(pid, {
         perfId: pid,
         directShowId: s.id,
         title: s.title,
         venueName: s.venueName,
-        specialPromoTitle: specialTitle,
+        specialPromoKeyword: specialKw,
         needsCast: !s.hasEnrichedCast,
-        priority: specialTitle ? 3 : 2,
+        priority: specialKw ? 3 : 2,
+        lastSyncedAt: s.lastSyncedAt ?? null,
       });
     }
 
@@ -1446,7 +1724,7 @@ export const yes24Adapter: ChannelSyncAdapter = {
         existing.endDate = g.endDate;
         existing.posterUrl = g.posterUrl;
       } else {
-        const specialTitle = specialPromoByPerfId.get(g.perfId);
+        const specialKw = specialPromoByPerfId.get(g.perfId);
         queue.set(g.perfId, {
           perfId: g.perfId,
           title: g.title,
@@ -1454,38 +1732,48 @@ export const yes24Adapter: ChannelSyncAdapter = {
           startDate: g.startDate,
           endDate: g.endDate,
           posterUrl: g.posterUrl,
-          specialPromoTitle: specialTitle,
-          priority: specialTitle ? 3 : 1,
+          specialPromoKeyword: specialKw,
+          priority: specialKw ? 3 : 1,
+          lastSyncedAt: null,
         });
       }
     }
 
-    const sortedQueue = Array.from(queue.values()).sort((a, b) => b.priority - a.priority);
+    const sortedQueue = Array.from(queue.values()).sort(
+      (a, b) => b.priority - a.priority || compareQueueStaleness(a.lastSyncedAt, b.lastSyncedAt),
+    );
     let castFetches = 0;
 
     for (const target of sortedQueue.slice(0, 12)) {
       const detailUrl = `https://ticket.yes24.com/Perf/${target.perfId}`;
       try {
-        const promoRes = await fetch("https://ticket.yes24.com/New/Perf/Detail/Popup/popPerfPromotion.aspx", {
-          method: "POST",
-          headers: {
-            ...BROWSER_HEADERS,
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            Referer: detailUrl,
-            "X-Requested-With": "XMLHttpRequest",
+        const promoRes = await fetchWithTimeout(
+          "https://ticket.yes24.com/New/Perf/Detail/Popup/popPerfPromotion.aspx",
+          {
+            method: "POST",
+            headers: {
+              ...BROWSER_HEADERS,
+              "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+              Referer: detailUrl,
+              "X-Requested-With": "XMLHttpRequest",
+            },
+            body: `IdPerf=${encodeURIComponent(target.perfId)}`,
           },
-          body: `IdPerf=${encodeURIComponent(target.perfId)}`,
-        });
+        );
         if (!promoRes.ok) continue;
 
-        const rows = parseYes24PromotionHtml(await promoRes.text());
+        const promoHtml = await promoRes.text();
+        const rows = parseYes24PromotionHtml(promoHtml);
+        if (/<table\b/i.test(promoHtml)) {
+          ctx?.fetchedProductKeyPrefixes?.add(`yes24-${target.perfId}-`);
+        }
 
         // Optional cast enrichment from Perf/{id} HTML when show has no NOL/YES24 cast yet
         let castCredits: CastCreditInput[] | undefined;
         if (target.needsCast && castFetches < 3) {
           castFetches += 1;
           try {
-            const pRes = await fetch(detailUrl, { headers: BROWSER_HEADERS });
+            const pRes = await fetchWithTimeout(detailUrl, { headers: BROWSER_HEADERS });
             if (pRes.ok) {
               const parsedCast = parseYes24CastHtml(await pRes.text());
               if (parsedCast.length > 0) castCredits = parsedCast;
@@ -1496,17 +1784,19 @@ export const yes24Adapter: ChannelSyncAdapter = {
         }
 
         let first = true;
-        for (let idx = 0; idx < rows.length; idx++) {
-          const row = rows[idx];
+        for (const row of rows) {
           const classified = classifyDiscountLabel(row.label);
           if (classified.isStatutory) continue;
           const labelDates = extractDiscountDatesFromLabel(row.label, {
             showStartDate: target.startDate,
             showEndDate: target.endDate,
           });
+          const stableHash = fnv1aHex(
+            `${row.seatGradeName.replace(/\s+/g, "")}|${row.label.replace(/\s+/g, "")}`,
+          );
 
           out.push({
-            externalKey: `yes24-${target.perfId}-${row.seatGrade}-${idx}`,
+            externalKey: `yes24-${target.perfId}-${row.seatGrade}-${stableHash}`,
             channelName: "YES24티켓",
             directShowId: target.directShowId,
             showTitle: target.title,
@@ -1537,7 +1827,7 @@ export const yes24Adapter: ChannelSyncAdapter = {
     try {
       const seen = new Set<string>();
       const regex = /href="(?:[^"]*NoticeMain\.aspx\?id=|#id=)(\d+)[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
-      const nRes = await fetch("https://ticket.yes24.com/New/Notice/Ajax/axList.aspx?page=1&genre=15457", {
+      const nRes = await fetchWithTimeout("https://ticket.yes24.com/New/Notice/Ajax/axList.aspx?page=1&genre=15457", {
         headers: BROWSER_HEADERS,
       });
       if (nRes.ok) {
@@ -1548,15 +1838,7 @@ export const yes24Adapter: ChannelSyncAdapter = {
           if (seen.has(id)) continue;
           seen.add(id);
           const title = m[2].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
-          const dealType: DealType | null = title.includes("싱어롱")
-            ? "SINGALONG"
-            : title.includes("커튼콜")
-              ? "CURTAIN_CALL"
-              : title.includes("특전") || title.includes("포토카드") || title.includes("굿즈")
-                ? "PERK_GOODS"
-                : /YES24데이|예스24데이/i.test(title)
-                  ? "SPECIAL_DAY"
-                  : null;
+          const dealType = classifyYes24NoticeTitle(title);
           if (!dealType) continue;
           const noticeDates = normalizeEventDates([], { fallbackText: title });
           const latestNotice = noticeDates.at(-1) ?? null;
@@ -1568,7 +1850,7 @@ export const yes24Adapter: ChannelSyncAdapter = {
             isUnconditional: true,
             conditionSummary: title,
             eventDates: noticeDates.length > 0 ? noticeDates : null,
-            expiresAt: latestNotice ? new Date(`${latestNotice}T23:59:59+09:00`).toISOString() : null,
+            expiresAt: latestNotice ? normalizeExpiresAtToUtcIso(latestNotice) : null,
             externalUrl: `https://ticket.yes24.com/New/Notice/NoticeMain.aspx?id=${id}`,
           });
         }
@@ -1592,39 +1874,85 @@ export interface LTicketSeatPriceRow {
   salePrice: number | null;
 }
 
+function extractBalancedDivInner(html: string, openTagStart: number): string | null {
+  const openEnd = html.indexOf(">", openTagStart);
+  if (openEnd === -1) return null;
+  const tagRe = /<\/?div\b[^>]*>/gi;
+  tagRe.lastIndex = openEnd + 1;
+  let depth = 1;
+  let m: RegExpExecArray | null;
+  while ((m = tagRe.exec(html)) !== null) {
+    if (m[0].startsWith("</")) {
+      depth -= 1;
+      if (depth === 0) return html.slice(openEnd + 1, m.index);
+    } else if (!m[0].endsWith("/>")) {
+      depth += 1;
+    }
+  }
+  return html.slice(openEnd + 1);
+}
+
+const LTICKET_NON_MUSICAL_TITLE_RE = /(?:연극|콘서트|전시|클래식|무용|발레|오페라|국악|페스티벌|Series\.L)/i;
+const LTICKET_NON_MUSICAL_CATEGORY_RE = /(?:콘서트|전시|클래식|스포츠|레저|무용|국악)/i;
+
+export function isLTicketNonMusical(title: string, category?: string | null): boolean {
+  const t = title.trim();
+  const c = (category ?? "").trim();
+  if (!t) return true;
+  if (t.includes("Series.L")) return true;
+  if (LTICKET_NON_MUSICAL_TITLE_RE.test(t) && !t.includes("뮤지컬")) return true;
+  if (c && LTICKET_NON_MUSICAL_CATEGORY_RE.test(c) && !c.includes("뮤지컬")) return true;
+  return false;
+}
+
 /** Parse ALL seat grade rows from L.TICKET detail HTML (`#seatPriceTable`). */
 export function parseLTicketAllSeatPrices(html: string): {
   title: string | null;
+  category: string | null;
   venueName: string | null;
   posterUrl: string | null;
   seats: LTicketSeatPriceRow[];
   discountImageUrls: string[];
 } {
-  const gaNameMatch = /item_name:\s*['"]([^'"]+)['"]/i.exec(html);
-  const ogMatch = /<meta\s+property="og:title"\s+content="([^"]+)"/i.exec(html);
+  const gaNameMatch =
+    /item_name:\s*'((?:\\'|[^'])+)'/i.exec(html) ?? /item_name:\s*"((?:\\"|[^"])+)"/i.exec(html);
+  const gaCatMatch =
+    /item_category:\s*'((?:\\'|[^'])+)'/i.exec(html) ?? /item_category:\s*"((?:\\"|[^"])+)"/i.exec(html);
+  const ogMatch =
+    /<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i.exec(html) ??
+    /<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:title["']/i.exec(html);
   const titleTagMatch = /<title>([^<]+)<\/title>/i.exec(html);
   const cleanTitle = (s?: string | null) => {
-    const t = s?.replace(/\s*[-|]\s*(L\.?TICKET|엘티켓).*$/i, "").trim() ?? "";
+    const t = s?.replace(/\\(['"])/g, "$1").replace(/\s*[-|]\s*(L\.?TICKET|엘티켓).*$/i, "").trim() ?? "";
     return !t || /^L\.?TICKET$/i.test(t) || t === "엘티켓" ? null : t;
   };
   const rawTitle = cleanTitle(gaNameMatch?.[1]) ?? cleanTitle(ogMatch?.[1]) ?? cleanTitle(titleTagMatch?.[1]);
+  const category = gaCatMatch?.[1]?.replace(/\\(['"])/g, "$1").trim() ?? null;
 
-  const venueMatch = /class="detail_place_link"[\s\S]*?<span>([^<]+)/i.exec(html);
+  const venueMatch = /class=["'][^"']*detail_place_link[^"']*["'][^>]*>[\s\S]{0,200}?<span>([^<]+)/i.exec(html);
   const venueName = venueMatch?.[1]?.trim() ?? null;
 
   const posterMatch =
-    /(https:\/\/cdn\.l-ticket\.co\.kr\/images\/product\/[^"'\s<>]+\.(?:jpg|jpeg|png|webp|gif))/i.exec(html);
-  const posterUrl = posterMatch?.[1] ?? null;
+    /((?:https?:)?\/\/cdn\.l-ticket\.co\.kr\/images\/product\/[^"'\s<>]+\.(?:jpg|jpeg|png|webp|gif))/i.exec(html);
+  const posterUrl = normalizeExternalHttpsUrl(posterMatch?.[1], "https://www.l-ticket.co.kr");
 
   const seats: LTicketSeatPriceRow[] = [];
   const rowRe =
-    /<th[^>]*scope="row"[^>]*>([^<]+)<\/th>\s*<td>\s*<div class="seat_price_value">\s*<strong>([0-9,]+)원<\/strong>(?:\s*<span class="max_discount">[^0-9]*([0-9,]+)원<\/span>)?/gi;
+    /<th[^>]*scope=["']row["'][^>]*>([^<]+)<\/th>\s*<td[^>]*>\s*<div[^>]*class=["'][^"']*seat_price_value[^"']*["'][^>]*>([\s\S]*?)<\/div>/gi;
   let m: RegExpExecArray | null;
   while ((m = rowRe.exec(html)) !== null) {
     const seatGradeName = m[1].trim();
-    const basePrice = parseKrwDigits(m[2]);
-    const salePrice = parseKrwDigits(m[3]);
+    const cellHtml = m[2];
+    const basePrice = parseKrwDigits(/<strong[^>]*>([0-9,]+)\s*원<\/strong>/i.exec(cellHtml)?.[1]);
     if (!basePrice) continue;
+    const maxDiscSpan = /<span[^>]*class=["'][^"']*max_discount[^"']*["'][^>]*>([\s\S]*?)<\/span>/i.exec(
+      cellHtml,
+    )?.[1];
+    let salePrice: number | null = null;
+    if (maxDiscSpan) {
+      const wonMatches = [...maxDiscSpan.matchAll(/([0-9,]+)\s*원/g)];
+      salePrice = parseKrwDigits(wonMatches.at(-1)?.[1]);
+    }
     seats.push({
       seatGrade: normalizeSeatGrade(seatGradeName),
       seatGradeName,
@@ -1633,17 +1961,27 @@ export function parseLTicketAllSeatPrices(html: string): {
     });
   }
 
-  // Extract discount info images from <h3>할인정보...</h3> accordion for Vision OCR
+  // Extract discount info images from <h3>할인정보...</h3> accordion (supports nested <div>s) for Vision OCR
   const discountImageUrls: string[] = [];
-  const discAcc = /<h3>\s*할인정보[\s\S]*?<div class="info_accordion_body">([\s\S]*?)<\/div>/i.exec(html)?.[1];
-  if (discAcc) {
-    for (const im of discAcc.matchAll(/src=["'](https:\/\/cdn\.l-ticket\.co\.kr\/images\/[^"']+\.(?:jpg|jpeg|png|webp))["']/gi)) {
-      if (!discountImageUrls.includes(im[1])) discountImageUrls.push(im[1]);
+  const discHeader = /<h3[^>]*>\s*할인정보[\s\S]{0,300}?<div[^>]*class=["'][^"']*info_accordion_body[^"']*["'][^>]*>/i.exec(
+    html,
+  );
+  if (discHeader && discHeader.index !== undefined) {
+    const bodyDivStart = html.indexOf("<div", discHeader.index);
+    const discAcc = bodyDivStart !== -1 ? extractBalancedDivInner(html, bodyDivStart) : null;
+    if (discAcc) {
+      for (const im of discAcc.matchAll(
+        /src=["']((?:https?:)?\/\/[^"']+\.(?:jpg|jpeg|png|webp)|\/images\/[^"']+\.(?:jpg|jpeg|png|webp))["']/gi,
+      )) {
+        const safeImg = normalizeExternalHttpsUrl(im[1], "https://www.l-ticket.co.kr");
+        if (safeImg && !discountImageUrls.includes(safeImg)) discountImageUrls.push(safeImg);
+      }
     }
   }
 
   return {
     title: rawTitle,
+    category,
     venueName,
     posterUrl,
     seats,
@@ -1686,15 +2024,28 @@ export function parseLTicketDetailHtml(html: string): {
   };
 }
 
-/** Tier-1 L.TICKET adapter: scans 뮤지컬·연극 (UWVJLM) + 지역 (FWALLB) + KOPIS-linked products, emits all discounted grades + queues 할인정보 OCR. */
+/** Tier-1 L.TICKET adapter: scans 뮤지컬·연극 (UWVJLM) + 지역 (FWALLB) + KOPIS-linked products, queues DRAFT max_discount + 할인정보 OCR. */
 export const lTicketAdapter: ChannelSyncAdapter = {
   sourceName: "LTICKET",
   async fetchDrafts(ctx) {
-    const ids = new Map<string, { hintName: string; directShowId?: number }>();
+    type LQueue = {
+      productId: string;
+      hintName: string;
+      directShowId?: number;
+      priority: number;
+      lastSyncedAt?: string | null;
+    };
+    const ids = new Map<string, LQueue>();
 
     for (const s of ctx?.shows ?? []) {
       if (s.channelLinks.lticket) {
-        ids.set(s.channelLinks.lticket, { hintName: s.title, directShowId: s.id });
+        ids.set(s.channelLinks.lticket, {
+          productId: s.channelLinks.lticket,
+          hintName: s.title,
+          directShowId: s.id,
+          priority: 2,
+          lastSyncedAt: s.lastSyncedAt ?? null,
+        });
       }
     }
 
@@ -1703,70 +2054,77 @@ export const lTicketAdapter: ChannelSyncAdapter = {
       "https://www.l-ticket.co.kr/product/list?condition=FWALLB",
     ]) {
       try {
-        const res = await fetch(url, { headers: BROWSER_HEADERS });
+        const res = await fetchWithTimeout(url, { headers: BROWSER_HEADERS });
         if (!res.ok) continue;
         const html = await res.text();
         const itemRe = /href="\/product\/detail\/(\d+)"[^>]*>[\s\S]{0,300}?<span class="on_sale_ticker_name">([\s\S]*?)<\/span>/gi;
         let m: RegExpExecArray | null;
         while ((m = itemRe.exec(html)) !== null) {
           const name = m[2].replace(/<[^>]+>/g, "").trim();
-          if (!ids.has(m[1])) ids.set(m[1], { hintName: name });
+          if (!ids.has(m[1])) ids.set(m[1], { productId: m[1], hintName: name, priority: 1, lastSyncedAt: null });
         }
         const genericRe = /href="\/product\/detail\/(\d+)"/gi;
         while ((m = genericRe.exec(html)) !== null) {
-          if (!ids.has(m[1])) ids.set(m[1], { hintName: "" });
+          if (!ids.has(m[1])) ids.set(m[1], { productId: m[1], hintName: "", priority: 0, lastSyncedAt: null });
         }
       } catch {
         // Keep other list tabs running
       }
     }
 
+    const sortedQueue = Array.from(ids.values()).sort(
+      (a, b) => b.priority - a.priority || compareQueueStaleness(a.lastSyncedAt, b.lastSyncedAt),
+    );
+
     const drafts: RawChannelDraft[] = [];
     let detailFetches = 0;
 
-    for (const [productId, meta] of ids) {
+    for (const meta of sortedQueue) {
+      const productId = meta.productId;
       if (detailFetches >= 10) break;
-      if (
-        meta.hintName &&
-        (meta.hintName.startsWith("연극") || meta.hintName.includes("Series.L") || isKidsMusical(meta.hintName))
-      ) {
+      if (meta.hintName && (isLTicketNonMusical(meta.hintName) || isKidsMusical(meta.hintName))) {
         continue;
       }
       detailFetches += 1;
 
       const detailUrl = `https://www.l-ticket.co.kr/product/detail/${productId}`;
       try {
-        const dRes = await fetch(detailUrl, { headers: BROWSER_HEADERS });
+        const dRes = await fetchWithTimeout(detailUrl, { headers: BROWSER_HEADERS });
         if (!dRes.ok) continue;
         const parsed = parseLTicketAllSeatPrices(await dRes.text());
         const showTitle = parsed.title || meta.hintName;
         if (
           !showTitle ||
-          showTitle.startsWith("연극") ||
-          showTitle.includes("Series.L") ||
+          isLTicketNonMusical(showTitle, parsed.category) ||
           isKidsMusical(showTitle, parsed.venueName)
         ) {
           continue;
         }
 
+        if (parsed.seats.length > 0) {
+          ctx?.fetchedProductKeyPrefixes?.add(`lticket-prod-${productId}-`);
+        }
+
         const discountedSeats = parsed.seats.filter((s) => s.salePrice !== null && s.salePrice < s.basePrice);
         let first = true;
         for (const seat of discountedSeats) {
+          const gradeSlug = fnv1aHex(seat.seatGradeName.replace(/\s+/g, ""));
           drafts.push({
-            externalKey: `lticket-prod-${productId}-${seat.seatGrade}-${seat.seatGradeName}`,
+            externalKey: `lticket-prod-${productId}-${seat.seatGrade}-${gradeSlug}`,
             channelName: "엘티켓",
             directShowId: meta.directShowId,
             showTitle,
             venueName: parsed.venueName ?? undefined,
-            dealType: "TIMESALE",
+            dealType: "DISCOUNT_SITE",
             seatGrade: seat.seatGrade,
             basePrice: seat.basePrice,
             salePrice: seat.salePrice,
-            isUnconditional: true,
-            conditionSummary: `엘티켓 ${seat.seatGradeName} 최대할인가`,
+            isUnconditional: false,
+            conditionSummary: "엘티켓 최대할인가 (조건 확인 필요)",
             externalUrl: detailUrl,
             posterUrl: parsed.posterUrl,
             noticeImageUrls: first ? parsed.discountImageUrls : [],
+            forceDraft: true,
           });
           first = false;
         }

@@ -115,7 +115,7 @@ export function HomeDealFilterGrid({ shows }: { shows: ShowCardItem[] }) {
             <div className="mt-7 flex justify-center">
               <Link
                 href={`/search?category=${active}`}
-                className="inline-flex h-11 items-center gap-1 rounded-sm border border-outline-strong bg-surface px-6 text-sm font-semibold text-on-surface transition-colors hover:border-primary hover:bg-surface-variant hover:text-primary"
+                className="inline-flex h-11 items-center gap-1 rounded-sm border border-outline-strong bg-surface px-6 text-sm font-semibold text-on-surface tabular-nums transition-colors hover:border-primary hover:bg-surface-variant hover:text-primary"
               >
                 <span>조건 검색에서 {currentTab.label} 전체 {filtered.length}편 보기</span>
                 <span className="material-symbols-outlined text-base" aria-hidden="true">

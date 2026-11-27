@@ -1,13 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { signJwt, verifyJwt } from "@/lib/jwt";
 import { AppError } from "@/lib/errors";
 import {
   ACCESS_COOKIE,
+  exchangeOAuthProfile,
   getJwtSecret,
   isAdminKakaoId,
   isLocalhostHost,
+  parseCookieHeader,
   requireAdmin,
   requireAuth,
+  rotateRefreshSession,
   sanitizeRedirectUrl,
   shouldBootstrapAdmin,
 } from "@/server/modules/auth";
@@ -96,5 +99,118 @@ describe("Auth & RBAC guards", () => {
     });
     const adminDb = makeMockDb({ id: 1, nickname: "운영자", email: "a@a.com", role: "ADMIN", oauthProvider: "GOOGLE" });
     expect((await requireAdmin(adminDb, reqAdmin, SECRET)).role).toBe("ADMIN");
+  });
+
+  it("parses malformed percent-encoded cookies without throwing URIError", () => {
+    const parsed = parseCookieHeader("broken=%E0%A4%A; md_access=valid-token; empty=");
+    expect(parsed.broken).toBe("%E0%A4%A");
+    expect(parsed.md_access).toBe("valid-token");
+  });
+
+  it("detects refresh token reuse or concurrent rotation race and revokes all user sessions", async () => {
+    const updateCalls: Array<Record<string, unknown>> = [];
+    let selectStep = 0;
+    const raceDb = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => {
+              selectStep += 1;
+              if (selectStep === 1) {
+                return [
+                  {
+                    id: 10,
+                    userId: 7,
+                    refreshTokenHash: "h",
+                    expiresAt: "2099-01-01T00:00:00.000Z",
+                    revokedAt: null,
+                  },
+                ];
+              }
+              return [{ id: 7, nickname: "관객", email: "u@a.com", role: "USER", status: "ACTIVE", oauthProvider: "KAKAO" }];
+            },
+          }),
+        }),
+      }),
+      update: () => ({
+        set: (vals: Record<string, unknown>) => {
+          updateCalls.push(vals);
+          return {
+            where: () => ({
+              // First update (atomic claim) returns [] -> lost race!
+              returning: async () => [],
+              then: (resolve: (v: unknown) => void) => resolve(undefined),
+            }),
+          };
+        },
+      }),
+    } as unknown as Parameters<typeof rotateRefreshSession>[0];
+
+    await expect(
+      rotateRefreshSession(raceDb, "raw-refresh", new Headers(), { secret: SECRET, isSecure: true }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED", status: 401 });
+    // 1st update attempted claim, 2nd update revoked all active sessions for userId=7
+    expect(updateCalls.length).toBe(2);
+  });
+});
+
+describe("OAuth verified email enforcement", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("ignores unverified Kakao and Google emails so they cannot bootstrap ADMIN", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(Response.json({ access_token: "tk" }))
+        .mockResolvedValueOnce(
+          Response.json({
+            id: 12345,
+            kakao_account: {
+              email: "admin@mudeal.kr",
+              is_email_verified: false,
+              is_email_valid: true,
+              profile: { nickname: "테스터" },
+            },
+          }),
+        )
+        .mockResolvedValueOnce(Response.json({ access_token: "gt" }))
+        .mockResolvedValueOnce(
+          Response.json({
+            sub: "g-1",
+            name: "구글유저",
+            email: "admin@mudeal.kr",
+            email_verified: false,
+          }),
+        )
+        .mockResolvedValueOnce(Response.json({ access_token: "gt2" }))
+        .mockResolvedValueOnce(
+          Response.json({
+            sub: "g-2",
+            name: "검증관리자",
+            email: "admin@mudeal.kr",
+            email_verified: true,
+          }),
+        ),
+    );
+
+    const kakaoUnverified = await exchangeOAuthProfile("KAKAO", "c", "https://mudeal.kr/cb", {
+      KAKAO_CLIENT_ID: "id",
+    });
+    expect(kakaoUnverified.email).toBeNull();
+
+    const googleUnverified = await exchangeOAuthProfile("GOOGLE", "c", "https://mudeal.kr/cb", {
+      GOOGLE_CLIENT_ID: "id",
+      GOOGLE_CLIENT_SECRET: "sec",
+    });
+    expect(googleUnverified.email).toBeNull();
+
+    const googleVerified = await exchangeOAuthProfile("GOOGLE", "c", "https://mudeal.kr/cb", {
+      GOOGLE_CLIENT_ID: "id",
+      GOOGLE_CLIENT_SECRET: "sec",
+    });
+    expect(googleVerified.email).toBe("admin@mudeal.kr");
   });
 });

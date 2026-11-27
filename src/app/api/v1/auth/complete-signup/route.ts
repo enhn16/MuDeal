@@ -72,6 +72,9 @@ export async function POST(req: Request) {
       .limit(1);
 
     if (!created) throw new AppError("INTERNAL_ERROR", "계정 생성에 실패했습니다.");
+    if (created.status !== "ACTIVE") {
+      throw new AppError("FORBIDDEN", "이용이 제한되거나 탈퇴한 계정입니다.");
+    }
 
     const authUser = {
       id: created.id,

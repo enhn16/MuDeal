@@ -11,7 +11,10 @@ import {
 } from "@/server/sync/kopis";
 import {
   AUTO_PUBLISH_CONFIDENCE,
+  classifyYes24NoticeTitle,
   DEFAULT_CHANNEL_ADAPTERS,
+  isLTicketNonMusical,
+  kstDateTimeToIso,
   matchShowThreeFactor,
   matchShowWithConfidence,
   normalizeCoreTitle,
@@ -25,6 +28,8 @@ import {
   parseYes24GenreListHtml,
   parseYes24PromotionHtml,
   parseYes24PromotionIds,
+  runChannelAdapter,
+  type ChannelSyncAdapter,
   type ShowMatchCandidate,
 } from "@/server/sync/channels";
 import {
@@ -34,7 +39,14 @@ import {
   isStatutoryOnlyDiscount,
 } from "@/server/sync/benefit-filter";
 import { isKidsMusical } from "@/server/sync/kids-filter";
-import { OcrExtractSchema } from "@/server/sync/ocr";
+import {
+  createGeminiVisionExtractor,
+  OcrExtractSchema,
+  parseDailyLimit,
+  processPendingOcrJobs,
+  safeFetchImage,
+} from "@/server/sync/ocr";
+import { expireEndedDeals } from "@/server/sync/expiry";
 
 describe("KOPIS parsers, relates extractor & Daehakro classifier", () => {
   it("parses pcseguidance base prices into seat map", () => {
@@ -507,5 +519,902 @@ describe("3-tier discount classification (unconditional / conditional / statutor
     });
     expect(parsed.discounts[0].conditionTags).toEqual(["MILITARY_PUBLIC", "MATINEE"]);
     expect(() => OcrExtractSchema.parse({ hasRelevantInfo: true, confidence: 1.5 })).toThrow();
+  });
+});
+
+describe("Phase 1 P0/P1 regression tests (matching, parsers, filters, OCR safety, expiry, KOPIS)", () => {
+  it("prevents false auto-publish on missing place hint, broad region partial matches, venue mismatch, and generic venue base", () => {
+    const cands: ShowMatchCandidate[] = [
+      {
+        id: 10,
+        normalizedTitle: normalizeCoreTitle("영웅"),
+        venueName: "세종문화회관 대극장",
+        region: "서울특별시",
+        subRegion: "SEOUL_OTHER",
+        startDate: "2026-11-01",
+        endDate: "2027-01-31",
+      },
+      {
+        id: 11,
+        normalizedTitle: normalizeCoreTitle("봄"),
+        venueName: "대학로 자유극장",
+        region: "서울특별시",
+        subRegion: "DAEHAKRO",
+        startDate: "2026-11-01",
+        endDate: "2027-01-31",
+      },
+    ];
+
+    // Exact title WITHOUT place hint -> capped at 0.80 (< AUTO_PUBLISH_CONFIDENCE)
+    const noPlace = matchShowWithConfidence(cands, { showTitle: "영웅" });
+    expect(noPlace?.showId).toBe(10);
+    expect(noPlace!.confidence).toBeLessThan(AUTO_PUBLISH_CONFIDENCE);
+
+    // Partial title + broad regionHint "서울" ONLY -> must NOT auto-publish
+    const partialSeoul = matchShowWithConfidence(cands, { showTitle: "영웅본색", regionHint: "서울" });
+    expect(partialSeoul?.confidence ?? 0).toBeLessThan(AUTO_PUBLISH_CONFIDENCE);
+
+    // 1-char candidate title "봄" must NOT partial-match "봄의 제전"
+    expect(matchShowWithConfidence(cands, { showTitle: "봄의 제전", regionHint: "서울" })).toBeNull();
+
+    // Explicit venue mismatch must NOT be overridden by broad regionHint "서울"
+    expect(
+      matchShowWithConfidence(cands, {
+        showTitle: "영웅",
+        venueName: "블루스퀘어 신한카드홀",
+        regionHint: "서울",
+      }),
+    ).toBeNull();
+
+    // Generic venue base ("대학로 아트홀" -> "대학로") must NOT match "대학로 자유극장"
+    expect(
+      matchShowWithConfidence(
+        [
+          {
+            id: 12,
+            normalizedTitle: normalizeCoreTitle("빨래"),
+            venueName: "대학로 자유극장",
+            region: "서울특별시",
+            subRegion: "DAEHAKRO",
+            startDate: "2026-11-01",
+            endDate: "2027-01-31",
+          },
+        ],
+        { showTitle: "빨래", venueName: "대학로 아트홀" },
+      ),
+    ).toBeNull();
+  });
+
+  it("parses YES24 multi-grade single table with thead, card-isolated GenreList, and blocks noisy notices", () => {
+    const singleTableHtml = `
+      <table>
+        <thead><tr><th>좌석등급</th><th>할인종류</th><th>가격</th></tr></thead>
+        <tbody>
+          <tr><th rowspan="2">VIP석</th><td>정가</td><td>170,000원</td></tr>
+          <tr><td>-조기예매 할인</td><td>136,000원</td></tr>
+          <tr><th rowspan="2">R석</th><td>일반가</td><td>140,000원</td></tr>
+          <tr><td>-마티네 할인</td><td>98,000원</td></tr>
+        </tbody>
+      </table>
+    `;
+    const rows = parseYes24PromotionHtml(singleTableHtml);
+    expect(rows).toEqual([
+      { seatGrade: "VIP", seatGradeName: "VIP석", basePrice: 170000, label: "조기예매 할인", salePrice: 136000 },
+      { seatGrade: "R", seatGradeName: "R석", basePrice: 140000, label: "마티네 할인", salePrice: 98000 },
+    ]);
+
+    // Card A has no <img>, Card B has http:// image & double quotes -> must NOT bleed B into A
+    const genreHtml = `
+      <a onclick="jsf_base_GoToPerfDetail(100001);" title="뮤지컬 A"><p class="list-b-tit2">2026.11.01 ~ 2026.12.31</p><p class="list-b-tit2">극장 A</p></a>
+      <a onclick="jsf_base_GoToPerfDetail(100002);" title="뮤지컬 B"><img src="http://tkfile.yes24.com/b.jpg"/><p class="list-b-tit2">2026.12.01 ~ 2027.01.31</p><p class="list-b-tit2">극장 B</p></a>
+    `;
+    const parsedList = parseYes24GenreListHtml(genreHtml);
+    expect(parsedList).toHaveLength(2);
+    expect(parsedList[0]).toMatchObject({ perfId: "100001", title: "뮤지컬 A", venueName: "극장 A", posterUrl: null });
+    expect(parsedList[1]).toMatchObject({
+      perfId: "100002",
+      title: "뮤지컬 B",
+      venueName: "극장 B",
+      posterUrl: "https://tkfile.yes24.com/b.jpg",
+    });
+
+    expect(classifyYes24NoticeTitle("[안내] 뮤지컬 A 커튼콜 촬영 불가 안내")).toBeNull();
+    expect(classifyYes24NoticeTitle("[공지] 뮤지컬 A MD 굿즈 판매 안내")).toBeNull();
+    expect(classifyYes24NoticeTitle("[티켓오픈] 뮤지컬 A 3차 티켓오픈 안내")).toBeNull();
+    expect(classifyYes24NoticeTitle("[티켓오픈] 뮤지컬 A 3차 티켓오픈 및 포토카드 증정 안내")).toBe("PERK_GOODS");
+    expect(classifyYes24NoticeTitle("뮤지컬 A YES24데이 특가 안내")).toBe("SPECIAL_DAY");
+  });
+
+  it("parses L.TICKET nested discount accordion, percentage-prefixed max_discount, and blocks non-musicals", () => {
+    const ltHtml = `
+      <script>items: [{ item_id: '200', item_name: '뮤지컬 It\\'s Showtime', item_category: '뮤지컬·연극' }]</script>
+      <a class="detail_place_link"><span>샤롯데씨어터</span></a>
+      <tr><th scope="row">VIP석</th><td class="price"><div class="seat_price_value"><strong>170,000원</strong><span class="max_discount">최대 50% 할인가 85,000원</span></div></td></tr>
+      <div class="info_accordion">
+        <h3>할인정보</h3>
+        <div class="info_accordion_body">
+          <div class="inner"><p>안내</p></div>
+          <div class="imgs"><img src="//cdn.l-ticket.co.kr/images/disc_200.png" /></div>
+        </div>
+      </div>
+    `;
+    const parsed = parseLTicketAllSeatPrices(ltHtml);
+    expect(parsed.title).toBe("뮤지컬 It's Showtime");
+    expect(parsed.seats).toEqual([
+      { seatGrade: "VIP", seatGradeName: "VIP석", basePrice: 170000, salePrice: 85000 },
+    ]);
+    expect(parsed.discountImageUrls).toEqual(["https://cdn.l-ticket.co.kr/images/disc_200.png"]);
+
+    expect(isLTicketNonMusical("[대학로] 연극 <옥탑방고양이>", "뮤지컬·연극")).toBe(true);
+    expect(isLTicketNonMusical("2026 김준수 콘서트", "콘서트")).toBe(true);
+    expect(isLTicketNonMusical("뮤지컬 <연의 편지>", "뮤지컬·연극")).toBe(false);
+  });
+
+  it("parses NOL regularPrice fallback, start/end KST bounds, and invalid sentinel dates safely", () => {
+    expect(kstDateTimeToIso("20261201", "start")).toBe("2026-11-30T15:00:00.000Z");
+    expect(kstDateTimeToIso("20261201", "end")).toBe("2026-12-01T14:59:59.000Z");
+    expect(kstDateTimeToIso("2026-12-01T14:30:00", "end")).toBe("2026-12-01T05:30:00.000Z");
+    expect(kstDateTimeToIso("9999-99-99", "end")).toBeNull();
+
+    const detailPayload = JSON.stringify(
+      `{"goodsDetail":{"goodsCode":"26099999","goodsName":"뮤지컬 테스트","playStartDate":"20261101","playEndDate":"20270131","bookingEndTime":"9999-99-99"},"prices":{"summary":{},"all":[{"seatGradeName":"OP석","priceGrade":"02","priceGradeName":"조기예매","regularPrice":150000,"salesPrice":105000,"priceType":"discount","priceStartDate":"2026-11-01","priceEndDate":"2026-11-30"}]}}`,
+    );
+    const parsed = parseNolProductDetailHtml(`<script>self.__next_f.push([1,${detailPayload}])</script>`, "26099999");
+    expect(parsed.startDate).toBe("2026-11-01");
+    expect(parsed.endDate).toBe("2027-01-31");
+    expect(parsed.bookingEndTime).toBeNull();
+    expect(parsed.discounts[0]).toMatchObject({
+      seatGrade: "VIP",
+      seatGradeName: "OP석",
+      basePrice: 150000,
+      salePrice: 105000,
+      discountStartDate: "2026-10-31T15:00:00.000Z",
+      discountEndDate: "2026-11-30T14:59:59.000Z",
+    });
+    expect(
+      parseNolNoticeImages(`<img src="HTTP://ticketimage.interpark.com/Play/ITM/Data/Modify/2026/11/abc.png" />`),
+    ).toEqual(["https://ticketimage.interpark.com/Play/ITM/Data/Modify/2026/11/abc.png"]);
+  });
+
+  it("hardens benefit-filter and kids-filter against FP/FN", () => {
+    expect(isStatutoryDiscount("중증장애(1~3급) 50%")).toBe(true);
+    expect(isStatutoryDiscount("실버 할인(1959년이전출생)")).toBe(true);
+    expect(isStatutoryDiscount("서울 다둥이행복카드 30%")).toBe(true);
+    expect(isStatutoryDiscount("장애물 없는 공연")).toBe(false);
+
+    expect(classifyDiscountLabel("시야제한석 40%").isUnconditional).toBe(false);
+    expect(classifyDiscountLabel("화수목 평일 할인 20%").isUnconditional).toBe(false);
+    expect(classifyDiscountLabel("10인 단체 할인 30%").isUnconditional).toBe(false);
+    expect(classifyDiscountLabel("예술인패스 25%").isUnconditional).toBe(false);
+    expect(classifyDiscountLabel("초/중/고 학생 할인").isUnconditional).toBe(false);
+
+    // Photocard & show title "우리 읍내" must NOT falsely trigger CARD_PARTNER
+    const photoPromo = classifyDiscountLabel("포토카드 증정 조기예매 할인");
+    expect(photoPromo.conditionTags).not.toContain("CARD_PARTNER");
+    expect(photoPromo.isUnconditional).toBe(true);
+    expect(classifyDiscountLabel("슈가DAY 할인", ["우리 읍내"]).conditionTags).not.toContain("CARD_PARTNER");
+    expect(hasMeaningfulBenefit({ dealType: "SPECIAL_DAY" })).toBe(true);
+
+    // Adult/major-theater classic musicals must NOT be blocked by kids-filter
+    expect(isKidsMusical("황태자 루돌프", "충무아트센터")).toBe(false);
+    expect(isKidsMusical("신데렐라", "충무아트센터")).toBe(false);
+    expect(isKidsMusical("미녀와 야수", "샤롯데씨어터")).toBe(false);
+    // Kids variants and missing kids IPs ARE blocked (case-insensitive)
+    expect(isKidsMusical("가족뮤지컬 신데렐라", "어린이극장")).toBe(true);
+    expect(isKidsMusical("신비아파트 뮤지컬", "올림픽홀")).toBe(true);
+    expect(isKidsMusical("브레드이발소", "성남아트센터")).toBe(true);
+    expect(isKidsMusical("어린왕자", "nc소극장")).toBe(true);
+  });
+
+  it("enforces OCR SSRF/redirect/size/content-type defense, dailyLimit safety, and Gemini model fallback", async () => {
+    expect(parseDailyLimit(undefined)).toBe(100);
+    expect(parseDailyLimit("not-a-number")).toBe(100);
+    expect(parseDailyLimit(0)).toBe(100);
+    expect(parseDailyLimit(-3)).toBe(100);
+    expect(parseDailyLimit("40")).toBe(40);
+
+    // SSRF & private IP blocking
+    const neverCalled = vi.fn();
+    await expect(safeFetchImage("http://example.com/a.jpg", neverCalled)).rejects.toThrow(/unsafe/i);
+    await expect(safeFetchImage("https://127.0.0.1/a.jpg", neverCalled)).rejects.toThrow(/unsafe/i);
+    await expect(safeFetchImage("https://169.254.169.254/latest/meta-data", neverCalled)).rejects.toThrow(/unsafe/i);
+    expect(neverCalled).not.toHaveBeenCalled();
+
+    // Redirect to private IP blocked
+    const redirectToLocal = vi.fn(async () =>
+      new Response(null, { status: 302, headers: { location: "https://localhost/secret.png" } }),
+    ) as unknown as typeof fetch;
+    await expect(safeFetchImage("https://cdn.example.com/a.png", redirectToLocal)).rejects.toThrow(/redirect/i);
+
+    // Non-image Content-Type blocked
+    const htmlFetch = vi.fn(async () =>
+      new Response("<html></html>", { status: 200, headers: { "content-type": "text/html" } }),
+    ) as unknown as typeof fetch;
+    await expect(safeFetchImage("https://cdn.example.com/a.png", htmlFetch)).rejects.toThrow(/Content-Type/i);
+
+    // Oversized stream blocked
+    const bigStreamFetch = vi.fn(async () =>
+      new Response(new Uint8Array(2048), { status: 200, headers: { "content-type": "image/png" } }),
+    ) as unknown as typeof fetch;
+    await expect(safeFetchImage("https://cdn.example.com/a.png", bigStreamFetch, { maxBytes: 1024 })).rejects.toThrow(
+      /max size/i,
+    );
+
+    // Schema bounds
+    const bounded = OcrExtractSchema.parse({
+      hasRelevantInfo: true,
+      confidence: 0.9,
+      discounts: [{ salePrice: 500, discountRate: 99, conditionSummary: "이상치" }],
+      events: [],
+    });
+    expect(bounded.discounts[0].salePrice).toBeNull();
+    expect(bounded.discounts[0].discountRate).toBeNull();
+
+    // Gemini extractor strips code fences and falls back to 2nd model on invalid JSON
+    let geminiCall = 0;
+    const mockGeminiFetch = vi.fn(async () => {
+      geminiCall += 1;
+      if (geminiCall === 1) {
+        return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "not-json" }] } }] }), {
+          status: 200,
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [{ text: '```json\n{"hasRelevantInfo":true,"confidence":0.9,"discounts":[],"events":[]}\n```' }],
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+    const extractor = createGeminiVisionExtractor("test-key", mockGeminiFetch);
+    const extracted = await extractor(new Uint8Array([1, 2, 3]).buffer, "image/png");
+    expect(geminiCall).toBe(2);
+    expect(extracted.confidence).toBe(0.9);
+  });
+
+  it("isolates OCR discount anomalies as DRAFT while auto-publishing clean high-confidence deals", async () => {
+    const insertedDeals: Array<Record<string, unknown>> = [];
+    const jobUpdates: Array<Record<string, unknown>> = [];
+    let selectCall = 0;
+
+    const mockDb = {
+      select: () => ({
+        from: () => ({
+          where: () => {
+            selectCall += 1;
+            // 1: stale PROCESSING jobs
+            if (selectCall === 1) return Promise.resolve([]);
+            // 2: usedToday count
+            if (selectCall === 2) return Promise.resolve([{ count: 0 }]);
+            // 3: queued jobs
+            if (selectCall === 3) {
+              return {
+                orderBy: () => ({
+                  limit: async () => [
+                    {
+                      id: 77,
+                      showId: 5,
+                      sourceChannel: "NOL티켓",
+                      sourcePageUrl: "https://nol.yanolja.com/ticket/products/26014511",
+                      imageUrl: "https://ticketimage.interpark.com/notice.png",
+                      ocrStatus: "QUEUED",
+                      errorMessage: null,
+                    },
+                  ],
+                }),
+              };
+            }
+            // 4: dup imageHash check
+            if (selectCall === 4) return { limit: async () => [] };
+            // 5: showMeta
+            if (selectCall === 5) {
+              return {
+                limit: async () => [
+                  {
+                    title: "뮤지컬 테스트",
+                    startDate: "2026-11-01",
+                    endDate: "2027-01-31",
+                    status: "ONGOING",
+                    basePricesJson: '{"VIP":170000,"R":100000,"A":80000}',
+                  },
+                ],
+              };
+            }
+            // 6: existingShowDeals
+            if (selectCall === 6) return Promise.resolve([]);
+            // 7..9: existing deals by externalKey
+            if (selectCall >= 7 && selectCall <= 9) return { limit: async () => [] };
+            // 10+: recomputeShowPriceCache query
+            return Promise.resolve([]);
+          },
+        }),
+      }),
+      insert: () => ({
+        values: (val: Record<string, unknown>) => {
+          insertedDeals.push(val);
+          return Promise.resolve();
+        },
+      }),
+      update: () => ({
+        set: (val: Record<string, unknown>) => {
+          jobUpdates.push(val);
+          return {
+            where: () => ({
+              returning: async () => [{ id: 77 }],
+            }),
+          };
+        },
+      }),
+    } as unknown as Parameters<typeof processPendingOcrJobs>[0];
+
+    const imgFetch = vi.fn(async () =>
+      new Response(new Uint8Array([137, 80, 78, 71]), { status: 200, headers: { "content-type": "image/png" } }),
+    ) as unknown as typeof fetch;
+
+    const res = await processPendingOcrJobs(
+      mockDb,
+      {
+        dailyLimit: 50,
+        fetchFn: imgFetch,
+        extractor: async () => ({
+          hasRelevantInfo: true,
+          confidence: 0.92,
+          discounts: [
+            // Clean discount: R 70,000 / 30% off 100,000 -> ACTIVE (invalid T24:00:00 safely ignored)
+            {
+              seatGrade: "R",
+              salePrice: 70000,
+              discountRate: 30,
+              isUnconditional: true,
+              conditionTags: [],
+              conditionSummary: "조기예매 할인",
+              expiresAtKst: "2026-12-20T24:00:00",
+              applicableDates: [],
+            },
+            // Anomaly: salePrice 95,000 claims 50% off 100,000 (>15%p mismatch) -> isolated as DRAFT
+            {
+              seatGrade: "R",
+              salePrice: 95000,
+              discountRate: 50,
+              isUnconditional: true,
+              conditionTags: [],
+              conditionSummary: "오추출 타임세일",
+              expiresAtKst: null,
+              applicableDates: [],
+            },
+            // Seat-grade base price anomaly: A seat basePrice is 80,000, salePrice 90,000 (>= gradeBase) -> DRAFT
+            {
+              seatGrade: "A",
+              salePrice: 90000,
+              discountRate: 10,
+              isUnconditional: true,
+              conditionTags: [],
+              conditionSummary: "A석 오추출 할인",
+              expiresAtKst: null,
+              applicableDates: [],
+            },
+          ],
+          events: [],
+        }),
+      },
+      new Date("2026-11-27T03:00:00.000Z"),
+    );
+
+    expect(res.processed).toBe(1);
+    expect(insertedDeals).toHaveLength(3);
+    expect(insertedDeals[0]).toMatchObject({ externalKey: "ocr:77:disc:0", status: "ACTIVE", expiresAt: null });
+    expect(insertedDeals[1]).toMatchObject({ externalKey: "ocr:77:disc:1", status: "DRAFT" });
+    expect(insertedDeals[2]).toMatchObject({ externalKey: "ocr:77:disc:2", status: "DRAFT" });
+  });
+
+  it("blocks in-place ACTIVE deal enrichment on low-confidence or anomalous OCR and enforces stale PROCESSING retry cap", async () => {
+    const dealUpdates: Array<Record<string, unknown>> = [];
+    const insertedDeals: Array<Record<string, unknown>> = [];
+    const staleUpdates: Array<Record<string, unknown>> = [];
+    let selectCall = 0;
+
+    const mockDb = {
+      select: () => ({
+        from: () => ({
+          where: () => {
+            selectCall += 1;
+            // 1: stale PROCESSING jobs (one under cap [retry:2], one at cap [retry:3])
+            if (selectCall === 1) {
+              return Promise.resolve([
+                { id: 10, errorMessage: "[retry:2] Recovered stale PROCESSING job" },
+                { id: 11, errorMessage: "[retry:3] Recovered stale PROCESSING job" },
+              ]);
+            }
+            // 2: usedToday count
+            if (selectCall === 2) return Promise.resolve([{ count: 0 }]);
+            // 3: queued jobs (low-confidence job 88 + high-confidence anomalous job 89)
+            if (selectCall === 3) {
+              return {
+                orderBy: () => ({
+                  limit: async () => [
+                    {
+                      id: 88,
+                      showId: 5,
+                      sourceChannel: "NOL티켓",
+                      sourcePageUrl: "https://nol.yanolja.com/ticket/products/26014511",
+                      imageUrl: "https://ticketimage.interpark.com/low.png",
+                      ocrStatus: "QUEUED",
+                      errorMessage: null,
+                    },
+                    {
+                      id: 89,
+                      showId: 5,
+                      sourceChannel: "NOL티켓",
+                      sourcePageUrl: "https://nol.yanolja.com/ticket/products/26014511",
+                      imageUrl: "https://ticketimage.interpark.com/anom.png",
+                      ocrStatus: "QUEUED",
+                      errorMessage: null,
+                    },
+                  ],
+                }),
+              };
+            }
+            // Job 88: 4=dup, 5=showMeta, 6=existingDeal by externalKey (existingShowDeals skipped because canAutoPublishBase=false)
+            if (selectCall === 4) return { limit: async () => [] };
+            if (selectCall === 5) {
+              return {
+                limit: async () => [
+                  {
+                    title: "뮤지컬 테스트",
+                    startDate: "2026-11-01",
+                    endDate: "2027-01-31",
+                    status: "ONGOING",
+                    basePricesJson: '{"R":100000}',
+                  },
+                ],
+              };
+            }
+            if (selectCall === 6) return { limit: async () => [] };
+
+            // Job 89: 7=dup, 8=showMeta, 9=existingShowDeals (contains matching ACTIVE deal!), 10=existingDeal by externalKey
+            if (selectCall === 7) return { limit: async () => [] };
+            if (selectCall === 8) {
+              return {
+                limit: async () => [
+                  {
+                    title: "뮤지컬 테스트",
+                    startDate: "2026-11-01",
+                    endDate: "2027-01-31",
+                    status: "ONGOING",
+                    basePricesJson: '{"R":100000}',
+                  },
+                ],
+              };
+            }
+            if (selectCall === 9) {
+              return Promise.resolve([
+                {
+                  id: 999,
+                  seatGrade: "R",
+                  discountRate: 30,
+                  conditionSummary: "조기예매 할인",
+                  expiresAt: null,
+                  eventDatesJson: null,
+                  adminLocked: 0,
+                },
+              ]);
+            }
+            return { limit: async () => [] };
+          },
+        }),
+      }),
+      insert: () => ({
+        values: (val: Record<string, unknown>) => {
+          insertedDeals.push(val);
+          return Promise.resolve();
+        },
+      }),
+      update: () => ({
+        set: (val: Record<string, unknown>) => {
+          if (typeof val.errorMessage === "string" && val.errorMessage.includes("Recovered stale")) {
+            staleUpdates.push(val);
+          } else if ("expiresAt" in val || "eventDatesJson" in val) {
+            dealUpdates.push(val);
+          }
+          return {
+            where: () => ({
+              returning: async () => [{ id: 88 }],
+            }),
+          };
+        },
+      }),
+    } as unknown as Parameters<typeof processPendingOcrJobs>[0];
+
+    let imgCall = 0;
+    const imgFetch = vi.fn(async () => {
+      imgCall += 1;
+      return new Response(new Uint8Array([137, 80, 78, imgCall]), {
+        status: 200,
+        headers: { "content-type": "image/png" },
+      });
+    }) as unknown as typeof fetch;
+
+    let extractCall = 0;
+    const res = await processPendingOcrJobs(
+      mockDb,
+      {
+        dailyLimit: 50,
+        fetchFn: imgFetch,
+        extractor: async () => {
+          extractCall += 1;
+          if (extractCall === 1) {
+            // Job 88: low confidence (0.65 < 0.85)
+            return {
+              hasRelevantInfo: true,
+              confidence: 0.65,
+              discounts: [
+                {
+                  seatGrade: "R",
+                  salePrice: 70000,
+                  discountRate: 30,
+                  isUnconditional: true,
+                  conditionTags: [],
+                  conditionSummary: "조기예매 할인",
+                  expiresAtKst: "2026-12-20T23:59:59",
+                  applicableDates: [],
+                },
+              ],
+              events: [],
+            };
+          }
+          // Job 89: high confidence (0.95) BUT anomalous price (salePrice 120,000 >= R basePrice 100,000)
+          return {
+            hasRelevantInfo: true,
+            confidence: 0.95,
+            discounts: [
+              {
+                seatGrade: "R",
+                salePrice: 120000,
+                discountRate: 30,
+                isUnconditional: true,
+                conditionTags: [],
+                conditionSummary: "조기예매 할인",
+                expiresAtKst: "2026-12-20T23:59:59",
+                applicableDates: [],
+              },
+            ],
+            events: [],
+          };
+        },
+      },
+      new Date("2026-11-27T03:00:00.000Z"),
+    );
+
+    expect(res.processed).toBe(2);
+    // Stale PROCESSING recovery respects retry cap (3 max): retry 3 -> QUEUED, retry 4 -> FAILED
+    expect(staleUpdates).toEqual([
+      expect.objectContaining({ ocrStatus: "QUEUED", errorMessage: "[retry:3] Recovered stale PROCESSING job" }),
+      expect.objectContaining({ ocrStatus: "FAILED", errorMessage: "[retry:4] Recovered stale PROCESSING job" }),
+    ]);
+    // Neither low-confidence nor anomalous OCR mutated the existing ACTIVE deal in-place!
+    expect(dealUpdates).toHaveLength(0);
+    // Both were safely isolated into DRAFT deals instead
+    expect(insertedDeals).toHaveLength(2);
+    expect(insertedDeals[0]).toMatchObject({ externalKey: "ocr:88:disc:0", status: "DRAFT" });
+    expect(insertedDeals[1]).toMatchObject({ externalKey: "ocr:89:disc:0", status: "DRAFT" });
+  });
+
+  it("protects shows backfill on low-confidence DRAFT, respects forceDraft & admin_locked, and skips ended deals in runChannelAdapter", async () => {
+    const insertedDeals: Array<Record<string, unknown>> = [];
+    const updatedTables: Array<Record<string, unknown>> = [];
+    let selectIdx = 0;
+
+    const mockDb = {
+      insert: () => ({
+        values: (val: Record<string, unknown>) => {
+          if ("externalKey" in val) insertedDeals.push(val);
+          return {
+            returning: async () => [{ id: 1 }],
+            onConflictDoNothing: async () => undefined,
+          };
+        },
+      }),
+      select: () => ({
+        from: () => {
+          selectIdx += 1;
+          // 1: shows
+          if (selectIdx === 1) {
+            return Promise.resolve([
+              {
+                id: 1,
+                kopisId: "PF1",
+                title: "뮤지컬 영웅",
+                normalizedTitle: "영웅",
+                posterUrl: null,
+                synopsisImageUrl: null,
+                channelLinksJson: null,
+                venueName: "세종문화회관",
+                region: "서울특별시",
+                subRegion: "SEOUL_OTHER",
+                startDate: "2026-11-01",
+                endDate: "2027-01-31",
+                status: "ONGOING",
+              },
+              {
+                id: 2,
+                kopisId: "PF2",
+                title: "뮤지컬 종료작",
+                normalizedTitle: "종료작",
+                posterUrl: null,
+                synopsisImageUrl: null,
+                channelLinksJson: null,
+                venueName: "충무아트센터",
+                region: "서울특별시",
+                subRegion: "SEOUL_OTHER",
+                startDate: "2025-01-01",
+                endDate: "2025-12-31",
+                status: "ENDED",
+              },
+            ]);
+          }
+          // 2: showActors
+          if (selectIdx === 2) return Promise.resolve([]);
+          // 3+: deals lookup by externalKey
+          return {
+            where: () => ({
+              limit: async () => [],
+            }),
+          };
+        },
+      }),
+      update: () => ({
+        set: (val: Record<string, unknown>) => {
+          updatedTables.push(val);
+          return { where: async () => undefined };
+        },
+      }),
+    } as unknown as Parameters<typeof runChannelAdapter>[0];
+
+    const adapter: ChannelSyncAdapter = {
+      sourceName: "TEST_CH",
+      async fetchDrafts() {
+        return [
+          // 1. Low-confidence match (no place hint -> 0.80 < 0.85) -> DRAFT and MUST NOT backfill shows.channelLinksJson
+          {
+            externalKey: "k-low",
+            channelName: "테스트",
+            showTitle: "영웅",
+            dealType: "TIMESALE",
+            basePrice: 100000,
+            salePrice: 70000,
+            externalUrl: "https://nol.yanolja.com/ticket/products/26000001",
+            posterUrl: "https://example.com/poster.jpg",
+          },
+          // 2. forceDraft (e.g. L.TICKET) with directShowId -> MUST stay DRAFT
+          {
+            externalKey: "k-forced-draft",
+            channelName: "엘티켓",
+            directShowId: 1,
+            showTitle: "영웅",
+            dealType: "DISCOUNT_SITE",
+            basePrice: 100000,
+            salePrice: 50000,
+            isUnconditional: false,
+            forceDraft: true,
+            externalUrl: "https://www.l-ticket.co.kr/product/detail/142",
+          },
+          // 3. Already expired deal -> MUST be skipped
+          {
+            externalKey: "k-expired",
+            channelName: "테스트",
+            directShowId: 1,
+            showTitle: "영웅",
+            dealType: "TIMESALE",
+            basePrice: 100000,
+            salePrice: 70000,
+            expiresAt: "2026-11-01T00:00:00.000Z",
+            externalUrl: "https://example.com/expired",
+          },
+        ];
+      },
+    };
+
+    const res = await runChannelAdapter(mockDb, adapter, new Date("2026-11-27T03:00:00.000Z"));
+    expect(res.status).toBe("SUCCESS");
+    expect(insertedDeals).toHaveLength(2);
+    expect(insertedDeals[0]).toMatchObject({ externalKey: "k-low", status: "DRAFT" });
+    expect(insertedDeals[1]).toMatchObject({ externalKey: "k-forced-draft", status: "DRAFT" });
+    // Ensure shows.channelLinksJson / posterUrl was NOT mutated by low-confidence or forceDraft items
+    expect(updatedTables.some((u) => "channelLinksJson" in u || "posterUrl" in u)).toBe(false);
+  });
+
+  it("expires non-normalized expiresAt, past eventDatesJson, and deals on KOPIS-ended shows", async () => {
+    const expiredIds: number[] = [];
+    let selectIdx = 0;
+
+    const mockDb = {
+      update: () => ({
+        set: () => ({
+          where: () => ({
+            returning: async () => [],
+          }),
+        }),
+      }),
+      select: () => ({
+        from: () => {
+          selectIdx += 1;
+          if (selectIdx === 1) {
+            // Deals on already-ENDED shows
+            return {
+              innerJoin: () => ({
+                where: async () => [{ id: 101, showId: 10 }],
+              }),
+            };
+          }
+          // Dated active deals: non-normalized KST string + past eventDatesJson + future deal
+          return {
+            where: async () => [
+              { id: 102, showId: 11, expiresAt: "2026-11-26 23:59:59", eventDatesJson: null },
+              { id: 103, showId: 11, expiresAt: null, eventDatesJson: '["2026-11-20","2026-11-25"]' },
+              { id: 104, showId: 11, expiresAt: "2026-12-31T14:59:59.000Z", eventDatesJson: '["2026-12-01"]' },
+            ],
+          };
+        },
+      }),
+    } as unknown as Parameters<typeof expireEndedDeals>[0];
+
+    // Spy update calls to count expired deal updates (after show update #1)
+    let updateCall = 0;
+    (mockDb as unknown as { update: unknown }).update = () => ({
+      set: (val: Record<string, unknown>) => ({
+        where: () => {
+          updateCall += 1;
+          if (updateCall === 1) return { returning: async () => [] };
+          if (val.status === "EXPIRED") expiredIds.push(updateCall);
+          return Promise.resolve();
+        },
+      }),
+    });
+
+    const res = await expireEndedDeals(mockDb, new Date("2026-11-27T03:00:00.000Z"));
+    expect(res.expiredDeals).toBe(3); // 101 (ended show) + 102 (non-normalized expiresAt) + 103 (past eventDatesJson)
+    expect(expiredIds).toHaveLength(3);
+  });
+
+  it("preserves existing DAEHAKRO subRegion and posterUrl when KOPIS re-sync skips detail fetch", async () => {
+    const updatedSets: Array<Record<string, unknown>> = [];
+    const listXml = `<dbs><db><mt20id>PF_DH</mt20id><prfnm>대학로 뮤지컬</prfnm><prfpdfrom>2026.11.01</prfpdfrom><prfpdto>2027.01.31</prfpdto><fcltynm>소극장 A</fcltynm><area>서울특별시</area><prfstate>공연중</prfstate></db></dbs>`;
+    const fakeFetch = vi.fn(async () => new Response(listXml, { status: 200 })) as unknown as typeof fetch;
+
+    const mockDb = {
+      insert: () => ({
+        values: () => ({ returning: async () => [{ id: 1 }], onConflictDoNothing: async () => undefined }),
+      }),
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => [
+              {
+                id: 9,
+                kopisId: "PF_DH",
+                posterUrl: "https://www.kopis.or.kr/existing.jpg",
+                subRegion: "DAEHAKRO",
+                basePricesJson: '{"ALL":50000}',
+                venueAddress: "서울 종로구",
+                channelLinksJson: '{"nol":"26000001"}',
+                synopsisImageUrl: "https://www.kopis.or.kr/syn.jpg",
+              },
+            ],
+          }),
+        }),
+      }),
+      update: () => ({
+        set: (val: Record<string, unknown>) => {
+          updatedSets.push(val);
+          return { where: async () => undefined };
+        },
+      }),
+    } as unknown as Parameters<typeof syncKopisShows>[0];
+
+    const res = await syncKopisShows(mockDb, "test-key", new Date("2026-11-27T00:00:00Z"), {
+      maxPages: 1,
+      fetchFn: fakeFetch,
+    });
+    expect(res.status).toBe("SUCCESS");
+    expect(res.detailFetchCount).toBe(0);
+    const showUpdate = updatedSets.find((s) => "subRegion" in s);
+    expect(showUpdate?.subRegion).toBe("DAEHAKRO");
+    expect(showUpdate?.posterUrl).toBe("https://www.kopis.or.kr/existing.jpg");
+  });
+
+  it("stops immediately on Gemini 429 without falling back to 2nd model or failing queued OCR jobs", async () => {
+    // 1. Vision extractor must NOT fall back to 2nd model on 429
+    let fetchCalls = 0;
+    const rateLimitedFetch = vi.fn(async () => {
+      fetchCalls += 1;
+      return new Response("quota exceeded", { status: 429 });
+    }) as unknown as typeof fetch;
+
+    const extractor = createGeminiVisionExtractor("test-key", rateLimitedFetch);
+    await expect(extractor(new Uint8Array([1, 2, 3]).buffer, "image/png")).rejects.toThrow("429");
+    expect(fetchCalls).toBe(1);
+
+    // 2. processPendingOcrJobs must pause batch on 429, requeue without [retry:N], and skip job #2
+    const jobUpdates: Array<Record<string, unknown>> = [];
+    let selectIdx = 0;
+    const mockDb = {
+      select: () => ({
+        from: () => {
+          selectIdx += 1;
+          if (selectIdx === 1) return { where: async () => [] }; // stale PROCESSING
+          if (selectIdx === 2) return { where: async () => [{ count: 0 }] }; // daily usage
+          if (selectIdx === 3) {
+            return {
+              where: () => ({
+                orderBy: () => ({
+                  limit: async () => [
+                    {
+                      id: 501,
+                      showId: 1,
+                      sourceChannel: "NOL",
+                      sourcePageUrl: "https://tickets.interpark.com/goods/1",
+                      imageUrl: "https://cdn.example.com/notice1.png",
+                      errorMessage: "[retry:3] prior 503",
+                    },
+                    {
+                      id: 502,
+                      showId: 1,
+                      sourceChannel: "NOL",
+                      sourcePageUrl: "https://tickets.interpark.com/goods/2",
+                      imageUrl: "https://cdn.example.com/notice2.png",
+                      errorMessage: null,
+                    },
+                  ],
+                }),
+              }),
+            };
+          }
+          if (selectIdx === 4) return { where: () => ({ limit: async () => [] }) }; // dup hash
+          return {
+            where: () => ({
+              limit: async () => [
+                { title: "테스트", startDate: "2026-11-01", endDate: "2026-12-31", status: "ONGOING", basePricesJson: null },
+              ],
+            }),
+          };
+        },
+      }),
+      update: () => ({
+        set: (val: Record<string, unknown>) => {
+          jobUpdates.push(val);
+          return {
+            where: () => ({
+              returning: async () => [{ id: 501 }],
+            }),
+          };
+        },
+      }),
+    } as unknown as Parameters<typeof processPendingOcrJobs>[0];
+
+    const imgFetch = vi.fn(
+      async () => new Response(new Uint8Array([1, 2, 3, 4]), { status: 200, headers: { "content-type": "image/png" } }),
+    ) as unknown as typeof fetch;
+    const throwingExtractor = vi.fn(async () => {
+      throw new Error("Gemini Vision HTTP 429");
+    });
+
+    const out = await processPendingOcrJobs(mockDb, {
+      dailyLimit: 100,
+      extractor: throwingExtractor,
+      fetchFn: imgFetch,
+      interCallDelayMs: 0,
+    });
+
+    expect(out.skippedByLimit).toBe(true);
+    expect(out.remainingDailyLimit).toBe(0);
+    expect(throwingExtractor).toHaveBeenCalledTimes(1); // Job #2 was NOT attempted
+    expect(jobUpdates.at(-1)).toMatchObject({ ocrStatus: "QUEUED" });
+    expect(String(jobUpdates.at(-1)?.errorMessage)).not.toContain("[retry:");
   });
 });

@@ -9,16 +9,79 @@ import {
   userActorFollows,
   userNotifications,
   userShowBookmarks,
+  users,
   type DealType,
   type SeatGrade,
 } from "@/db/schema";
 import { AppError } from "@/lib/errors";
-import { isExpired, normalizeEventDates, startOfKstDayUtc } from "@/lib/kst";
+import { isExpired, normalizeEventDates, normalizeExpiresAtToUtcIso, startOfKstDayUtc } from "@/lib/kst";
 import { calcDiscountRate } from "@/lib/pricing";
 import { parseSafeExternalUrl } from "@/lib/url";
 import type { AuthUser } from "./auth";
 
 export const DAILY_REPORT_LIMIT = 10;
+const D1_NOTI_INSERT_CHUNK = 8;
+const D1_IN_ARRAY_CHUNK = 50;
+
+/** Strictly validate optional expiresAt and normalize into canonical UTC ISO string. */
+export function normalizeOptionalExpiresAt(raw: string | null | undefined): string | null {
+  if (raw === undefined || raw === null) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const normalized = normalizeExpiresAtToUtcIso(trimmed);
+  if (!normalized) {
+    throw new AppError("VALIDATION_ERROR", "유효한 마감 일시 형식을 입력해 주세요.");
+  }
+  return normalized;
+}
+
+/** Detect allowed image format strictly from binary magic bytes (blocks MIME spoofing). */
+export function detectAllowedImageMagic(
+  bytes: Uint8Array,
+): { mime: "image/jpeg" | "image/png" | "image/webp"; ext: "jpg" | "png" | "webp" } | null {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return { mime: "image/jpeg", ext: "jpg" };
+  }
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  ) {
+    return { mime: "image/png", ext: "png" };
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return { mime: "image/webp", ext: "webp" };
+  }
+  return null;
+}
+
+/** Enforce evidenceR2Key ownership and safe path pattern (prevents cross-user IDOR). */
+export function validateUserEvidenceKey(key: string | null | undefined, userId: number): string | null {
+  if (key === undefined || key === null) return null;
+  const trimmed = key.trim();
+  if (!trimmed) return null;
+  const pattern = new RegExp(`^reports/${userId}/[0-9]+-[a-f0-9-]+\\.(jpg|png|webp)$`);
+  if (!pattern.test(trimmed)) {
+    throw new AppError("VALIDATION_ERROR", "본인이 업로드한 유효한 증빙 이미지 키만 첨부할 수 있습니다.");
+  }
+  return trimmed;
+}
 
 export async function writeAuditLog(
   db: AppDb,
@@ -60,7 +123,7 @@ export async function recomputeShowPriceCache(db: AppDb, showId: number, now = n
     .where(eq(shows.id, showId));
 }
 
-async function fanoutNewDealNotifications(
+export async function fanoutNewDealNotifications(
   db: AppDb,
   deal: { id: number; showId: number; channelName: string; conditionSummary: string | null },
   showTitle: string,
@@ -77,13 +140,15 @@ async function fanoutNewDealNotifications(
   ]);
 
   const actorIds = castRows.map((c) => c.actorId);
-  const followers =
-    actorIds.length > 0
-      ? await db
-          .select({ userId: userActorFollows.userId, actorId: userActorFollows.actorId })
-          .from(userActorFollows)
-          .where(inArray(userActorFollows.actorId, actorIds))
-      : [];
+  const followers: Array<{ userId: number; actorId: number }> = [];
+  for (let i = 0; i < actorIds.length; i += D1_IN_ARRAY_CHUNK) {
+    const chunk = actorIds.slice(i, i + D1_IN_ARRAY_CHUNK);
+    const rows = await db
+      .select({ userId: userActorFollows.userId, actorId: userActorFollows.actorId })
+      .from(userActorFollows)
+      .where(inArray(userActorFollows.actorId, chunk));
+    followers.push(...rows);
+  }
 
   const toInsert: Array<typeof userNotifications.$inferInsert> = [];
   const seenUsers = new Set<number>();
@@ -116,9 +181,21 @@ async function fanoutNewDealNotifications(
     });
   }
 
-  if (toInsert.length > 0) {
-    await db.insert(userNotifications).values(toInsert).onConflictDoNothing();
+  for (let i = 0; i < toInsert.length; i += D1_NOTI_INSERT_CHUNK) {
+    await db
+      .insert(userNotifications)
+      .values(toInsert.slice(i, i + D1_NOTI_INSERT_CHUNK))
+      .onConflictDoNothing();
   }
+}
+
+async function isActiveUser(db: AppDb, userId: number): Promise<boolean> {
+  const [u] = await db
+    .select({ status: users.status })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  return u?.status === "ACTIVE";
 }
 
 export interface SubmitReportInput {
@@ -149,6 +226,9 @@ export async function submitDealReport(
     throw new AppError("VALIDATION_ERROR", "유효한 https:// 원문 예매처 링크를 입력해 주세요.");
   }
 
+  const normalizedExpiresAt = normalizeOptionalExpiresAt(input.expiresAt);
+  const safeEvidenceKey = validateUserEvidenceKey(input.evidenceR2Key, user.id);
+
   const kstStart = startOfKstDayUtc(now);
   const [countRow] = await db
     .select({ count: sql<number>`count(*)` })
@@ -177,8 +257,8 @@ export async function submitDealReport(
       reportedDiscountRate: input.reportedDiscountRate ?? null,
       isUnconditional: input.isUnconditional === false ? 0 : 1,
       conditionNote: input.conditionNote?.trim() || null,
-      expiresAt: input.expiresAt || null,
-      evidenceR2Key: input.evidenceR2Key || null,
+      expiresAt: normalizedExpiresAt,
+      evidenceR2Key: safeEvidenceKey,
       status: "PENDING",
     })
     .returning();
@@ -196,6 +276,7 @@ export interface ApproveReportOverrides {
   discountRate?: number | null;
   isUnconditional?: boolean;
   conditionSummary?: string | null;
+  expiresAt?: string | null;
   maskNickname?: boolean;
 }
 
@@ -213,9 +294,22 @@ export async function approveUserReport(
     .where(eq(dealReports.id, reportId))
     .limit(1);
   if (!report) throw new AppError("NOT_FOUND", "제보 내역을 찾을 수 없습니다.");
+  if (report.status !== "PENDING") {
+    throw new AppError("REPORT_ALREADY_PROCESSED", "이미 검수가 완료된 제보입니다.");
+  }
+
+  const safeUrl = parseSafeExternalUrl(report.externalUrl ?? "");
+  if (!safeUrl) {
+    throw new AppError("VALIDATION_ERROR", "안전하지 않은 외부 URL(https:// 필수)은 게시할 수 없습니다.");
+  }
 
   const [show] = await db.select().from(shows).where(eq(shows.id, overrides.showId)).limit(1);
   if (!show) throw new AppError("VALIDATION_ERROR", "매핑할 KOPIS 작품을 선택해 주세요.");
+
+  const normalizedExplicitExpiresAt =
+    overrides.expiresAt !== undefined
+      ? normalizeOptionalExpiresAt(overrides.expiresAt)
+      : normalizeOptionalExpiresAt(report.expiresAt);
 
   const nowIso = now.toISOString();
   const updated = await db
@@ -259,61 +353,84 @@ export async function approveUserReport(
     : [];
   const latestEventDate = parsedEventDates.at(-1) ?? null;
 
-  const [published] = await db
-    .insert(deals)
-    .values({
-      showId: show.id,
-      channelName: overrides.channelName?.trim() || report.channelName,
-      dealType: finalDealType,
-      seatGrade: overrides.seatGrade ?? report.seatGrade,
-      basePrice,
-      salePrice,
-      discountRate: computedRate,
-      isUnconditional:
-        overrides.isUnconditional !== undefined
-          ? overrides.isUnconditional
-            ? 1
-            : 0
-          : report.isUnconditional,
-      conditionSummary: finalConditionSummary,
-      perkSummary: finalDealType === "PERK_GOODS" ? finalConditionSummary : null,
-      eventDatesJson: parsedEventDates.length > 0 ? JSON.stringify(parsedEventDates) : null,
-      externalUrl: report.externalUrl,
-      expiresAt:
-        report.expiresAt ??
-        (latestEventDate ? new Date(`${latestEventDate}T23:59:59+09:00`).toISOString() : null),
-      status: "ACTIVE",
-      sourceType: "USER_REPORT",
-      sourceReportId: report.id,
-      reporterNickname: displayNickname,
-      lastVerifiedAt: nowIso,
-    })
-    .returning();
+  let published: typeof deals.$inferSelect;
+  try {
+    const [inserted] = await db
+      .insert(deals)
+      .values({
+        showId: show.id,
+        channelName: overrides.channelName?.trim() || report.channelName,
+        dealType: finalDealType,
+        seatGrade: overrides.seatGrade ?? report.seatGrade,
+        basePrice,
+        salePrice,
+        discountRate: computedRate,
+        isUnconditional:
+          overrides.isUnconditional !== undefined
+            ? overrides.isUnconditional
+              ? 1
+              : 0
+            : report.isUnconditional,
+        conditionSummary: finalConditionSummary,
+        perkSummary: finalDealType === "PERK_GOODS" ? finalConditionSummary : null,
+        eventDatesJson: parsedEventDates.length > 0 ? JSON.stringify(parsedEventDates) : null,
+        externalUrl: safeUrl,
+        expiresAt:
+          normalizedExplicitExpiresAt ??
+          (latestEventDate ? normalizeExpiresAtToUtcIso(latestEventDate) : null),
+        status: "ACTIVE",
+        sourceType: "USER_REPORT",
+        sourceReportId: report.id,
+        reporterNickname: displayNickname,
+        lastVerifiedAt: nowIso,
+      })
+      .returning();
+    published = inserted;
+  } catch (err) {
+    // Compensate: revert report back to PENDING so failed publish does not leave half-committed APPROVED state.
+    await db
+      .update(dealReports)
+      .set({ status: "PENDING", reviewerId: null, reviewedAt: null, updatedAt: new Date().toISOString() })
+      .where(and(eq(dealReports.id, reportId), eq(dealReports.status, "APPROVED")))
+      .catch(() => undefined);
+    throw err;
+  }
 
   await recomputeShowPriceCache(db, show.id, now);
-  await fanoutNewDealNotifications(
-    db,
-    {
-      id: published.id,
-      showId: show.id,
-      channelName: published.channelName,
-      conditionSummary: published.conditionSummary,
-    },
-    show.title,
-  );
-  await db
-    .insert(userNotifications)
-    .values({
-      userId: report.reporterId,
-      notiType: "REPORT_APPROVED",
-      showId: show.id,
-      dealId: published.id,
-      reportId: report.id,
-      title: `제보 승인 완료 · ${show.title}`,
-      body: `'제보해주신 딜' 판에 ${displayNickname}님 이름으로 게시되었습니다.`,
-      dedupKey: `report-approved:${report.id}`,
-    })
-    .onConflictDoNothing();
+  try {
+    await fanoutNewDealNotifications(
+      db,
+      {
+        id: published.id,
+        showId: show.id,
+        channelName: published.channelName,
+        conditionSummary: published.conditionSummary,
+      },
+      show.title,
+    );
+  } catch {
+    // Isolate fanout errors so approval does not return 500 after deal publication.
+  }
+
+  try {
+    if (await isActiveUser(db, report.reporterId)) {
+      await db
+        .insert(userNotifications)
+        .values({
+          userId: report.reporterId,
+          notiType: "REPORT_APPROVED",
+          showId: show.id,
+          dealId: published.id,
+          reportId: report.id,
+          title: `제보 승인 완료 · ${show.title}`,
+          body: `'제보해주신 딜' 판에 ${displayNickname}님 이름으로 게시되었습니다.`,
+          dedupKey: `report-approved:${report.id}`,
+        })
+        .onConflictDoNothing();
+    }
+  } catch {
+    // Isolate notification write failure.
+  }
 
   await writeAuditLog(db, adminId, "REPORT_APPROVED", "deal_report", report.id, {
     publishedDealId: published.id,
@@ -360,17 +477,23 @@ export async function rejectUserReport(
     throw new AppError("REPORT_ALREADY_PROCESSED", "이미 검수가 완료된 제보입니다.");
   }
 
-  await db
-    .insert(userNotifications)
-    .values({
-      userId: report.reporterId,
-      notiType: "REPORT_REJECTED",
-      reportId: report.id,
-      title: `제보 반려 안내 · ${report.reportedShowTitle}`,
-      body: `반려 사유: ${cleaned}`,
-      dedupKey: `report-rejected:${report.id}`,
-    })
-    .onConflictDoNothing();
+  try {
+    if (await isActiveUser(db, report.reporterId)) {
+      await db
+        .insert(userNotifications)
+        .values({
+          userId: report.reporterId,
+          notiType: "REPORT_REJECTED",
+          reportId: report.id,
+          title: `제보 반려 안내 · ${report.reportedShowTitle}`,
+          body: `반려 사유: ${cleaned}`,
+          dedupKey: `report-rejected:${report.id}`,
+        })
+        .onConflictDoNothing();
+    }
+  } catch {
+    // Isolate notification write failure.
+  }
 
   await writeAuditLog(db, adminId, "REPORT_REJECTED", "deal_report", report.id, {
     reasonCode,
@@ -380,30 +503,79 @@ export async function rejectUserReport(
   return { rejectedReportId: report.id };
 }
 
+export interface ApproveDraftOverrides {
+  showId?: number;
+  dealType?: DealType;
+  seatGrade?: SeatGrade;
+  salePrice?: number | null;
+  discountRate?: number | null;
+  conditionSummary?: string | null;
+  expiresAt?: string | null;
+  perkSummary?: string | null;
+}
+
 export async function approveDraftDeal(
   db: AppDb,
   adminId: number,
   dealId: number,
-  overrides: { showId?: number; salePrice?: number | null; discountRate?: number | null; conditionSummary?: string | null } = {},
+  overrides: ApproveDraftOverrides = {},
   now = new Date(),
 ) {
   const [draft] = await db.select().from(deals).where(eq(deals.id, dealId)).limit(1);
   if (!draft) throw new AppError("NOT_FOUND", "초안 딜을 찾을 수 없습니다.");
+  if (draft.status !== "DRAFT") {
+    throw new AppError("REPORT_ALREADY_PROCESSED", "이미 처리된 초안입니다.");
+  }
+
+  const safeUrl = parseSafeExternalUrl(draft.externalUrl ?? "");
+  if (!safeUrl) {
+    throw new AppError("VALIDATION_ERROR", "안전하지 않은 외부 URL(https:// 필수)은 게시할 수 없습니다.");
+  }
 
   const targetShowId = overrides.showId ?? draft.showId;
   if (!targetShowId) throw new AppError("VALIDATION_ERROR", "작품을 매핑한 뒤 승인해 주세요.");
   const [show] = await db.select().from(shows).where(eq(shows.id, targetShowId)).limit(1);
   if (!show) throw new AppError("VALIDATION_ERROR", "유효하지 않은 작품 ID입니다.");
 
+  const nextExpiresAt =
+    overrides.expiresAt !== undefined
+      ? normalizeOptionalExpiresAt(overrides.expiresAt)
+      : normalizeOptionalExpiresAt(draft.expiresAt);
+
+  const nextSalePrice = overrides.salePrice !== undefined ? overrides.salePrice : draft.salePrice;
+  const nextDiscountRate =
+    overrides.discountRate !== undefined
+      ? overrides.discountRate
+      : overrides.salePrice !== undefined && draft.basePrice !== null && draft.basePrice > 0
+        ? calcDiscountRate(draft.basePrice, nextSalePrice)
+        : draft.discountRate;
+
+  const hasAdminOverride =
+    overrides.showId !== undefined ||
+    overrides.dealType !== undefined ||
+    overrides.seatGrade !== undefined ||
+    overrides.salePrice !== undefined ||
+    overrides.discountRate !== undefined ||
+    overrides.conditionSummary !== undefined ||
+    overrides.expiresAt !== undefined ||
+    overrides.perkSummary !== undefined;
+  const nextAdminLocked = hasAdminOverride ? 1 : draft.adminLocked;
+
   const nowIso = now.toISOString();
   const updated = await db
     .update(deals)
     .set({
       showId: show.id,
-      salePrice: overrides.salePrice !== undefined ? overrides.salePrice : draft.salePrice,
-      discountRate: overrides.discountRate !== undefined ? overrides.discountRate : draft.discountRate,
+      dealType: overrides.dealType ?? draft.dealType,
+      seatGrade: overrides.seatGrade ?? draft.seatGrade,
+      salePrice: nextSalePrice,
+      discountRate: nextDiscountRate,
       conditionSummary:
         overrides.conditionSummary !== undefined ? overrides.conditionSummary : draft.conditionSummary,
+      perkSummary: overrides.perkSummary !== undefined ? overrides.perkSummary : draft.perkSummary,
+      expiresAt: nextExpiresAt,
+      externalUrl: safeUrl,
+      adminLocked: nextAdminLocked,
       status: "ACTIVE",
       lastVerifiedAt: nowIso,
       updatedAt: nowIso,
@@ -416,17 +588,25 @@ export async function approveDraftDeal(
   }
 
   await recomputeShowPriceCache(db, show.id, now);
-  await fanoutNewDealNotifications(
-    db,
-    {
-      id: updated[0].id,
-      showId: show.id,
-      channelName: updated[0].channelName,
-      conditionSummary: updated[0].conditionSummary,
-    },
-    show.title,
-  );
-  await writeAuditLog(db, adminId, "DRAFT_APPROVED", "deal", dealId, { showId: show.id });
+  try {
+    await fanoutNewDealNotifications(
+      db,
+      {
+        id: updated[0].id,
+        showId: show.id,
+        channelName: updated[0].channelName,
+        conditionSummary: updated[0].conditionSummary,
+      },
+      show.title,
+    );
+  } catch {
+    // Isolate fanout errors so approval does not return 500 after activation.
+  }
+
+  await writeAuditLog(db, adminId, "DRAFT_APPROVED", "deal", dealId, {
+    showId: show.id,
+    adminLocked: nextAdminLocked === 1,
+  });
   return { publishedDealId: dealId };
 }
 

@@ -1,6 +1,18 @@
 import { AppError, jsonError } from "@/lib/errors";
 import { getAuthEnv, requireRuntimeAdmin } from "@/server/modules/auth-runtime";
 
+const ALLOWED_RESPONSE_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+function resolveSafeEvidenceMime(rawContentType: string | undefined, key: string): string {
+  const normalized = rawContentType?.split(";")[0]?.trim().toLowerCase() ?? "";
+  if (ALLOWED_RESPONSE_MIMES.has(normalized)) return normalized;
+  const lowerKey = key.toLowerCase();
+  if (lowerKey.endsWith(".png")) return "image/png";
+  if (lowerKey.endsWith(".webp")) return "image/webp";
+  if (lowerKey.endsWith(".jpg") || lowerKey.endsWith(".jpeg")) return "image/jpeg";
+  return "application/octet-stream";
+}
+
 /** Admin-only R2 evidence image viewer with strict prefix & path-traversal guard. */
 export async function GET(req: Request) {
   try {
@@ -20,8 +32,10 @@ export async function GET(req: Request) {
     }
 
     const headers = new Headers();
-    headers.set("Content-Type", obj.httpMetadata?.contentType || "image/jpeg");
+    headers.set("Content-Type", resolveSafeEvidenceMime(obj.httpMetadata?.contentType, key));
     headers.set("Cache-Control", "private, max-age=300");
+    headers.set("Content-Security-Policy", "sandbox");
+    headers.set("X-Content-Type-Options", "nosniff");
     return new Response(obj.body, { status: 200, headers });
   } catch (err) {
     return jsonError(err);

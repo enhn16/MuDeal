@@ -4,6 +4,7 @@ import { ocrImageJobs } from "@/db/schema";
 import { jsonError } from "@/lib/errors";
 import { startOfKstDayUtc } from "@/lib/kst";
 import { getAuthEnv, requireRuntimeAdmin } from "@/server/modules/auth-runtime";
+import { parseDailyLimit } from "@/server/sync/ocr";
 
 export async function GET(req: Request) {
   try {
@@ -15,14 +16,20 @@ export async function GET(req: Request) {
       db
         .select({ count: sql<number>`count(*)` })
         .from(ocrImageJobs)
-        .where(and(gte(ocrImageJobs.updatedAt, kstStart), sql`${ocrImageJobs.ocrStatus} IN ('DONE', 'NEEDS_REVIEW')`)),
+        .where(
+          and(
+            gte(ocrImageJobs.updatedAt, kstStart),
+            sql`${ocrImageJobs.ocrStatus} IN ('DONE', 'NEEDS_REVIEW', 'FAILED')`,
+            sql`(${ocrImageJobs.extractedJson} IS NULL OR ${ocrImageJobs.extractedJson} NOT LIKE '%"skippedDuplicate":true%')`,
+          ),
+        ),
     ]);
 
     return Response.json({
       data: {
         items,
         todayProcessed: Number(doneToday?.count ?? 0),
-        dailyLimit: Number(getAuthEnv().OCR_DAILY_LIMIT || 100),
+        dailyLimit: parseDailyLimit(getAuthEnv().OCR_DAILY_LIMIT),
       },
     });
   } catch (err) {

@@ -78,9 +78,14 @@ export async function voteDealHelpful(
   db: AppDb,
   dealId: number,
   identity: { userId?: number; sessionHash: string },
+  now = new Date(),
 ) {
   const [deal] = await db.select().from(deals).where(eq(deals.id, dealId)).limit(1);
   if (!deal) throw new AppError("NOT_FOUND", "해당 딜을 찾을 수 없습니다.");
+
+  if (deal.status !== "ACTIVE" || isExpired(deal.expiresAt, now)) {
+    throw new AppError("DEAL_EXPIRED", "이미 마감되었거나 비활성화된 할인/이벤트입니다.");
+  }
 
   if (identity.userId) {
     const [existing] = await db
@@ -90,32 +95,51 @@ export async function voteDealHelpful(
       .limit(1);
 
     if (existing) {
-      await db.delete(dealHelpfulVotes).where(eq(dealHelpfulVotes.id, existing.id));
-      const next = Math.max(0, deal.helpfulCount - 1);
-      await db.update(deals).set({ helpfulCount: next }).where(eq(deals.id, dealId));
-      return { voted: false, helpfulCount: next };
+      const deleted = await db
+        .delete(dealHelpfulVotes)
+        .where(and(eq(dealHelpfulVotes.dealId, dealId), eq(dealHelpfulVotes.userId, identity.userId)))
+        .returning({ id: dealHelpfulVotes.id });
+      if (deleted.length > 0) {
+        const [updated] = await db
+          .update(deals)
+          .set({ helpfulCount: sql`max(0, ${deals.helpfulCount} - 1)` })
+          .where(eq(deals.id, dealId))
+          .returning({ helpfulCount: deals.helpfulCount });
+        return { voted: false, helpfulCount: updated?.helpfulCount ?? Math.max(0, deal.helpfulCount - 1) };
+      }
+      return { voted: false, helpfulCount: deal.helpfulCount };
     }
 
-    await db.insert(dealHelpfulVotes).values({ dealId, userId: identity.userId });
-    const next = deal.helpfulCount + 1;
-    await db.update(deals).set({ helpfulCount: next }).where(eq(deals.id, dealId));
-    return { voted: true, helpfulCount: next };
-  }
-
-  const [existingGuest] = await db
-    .select({ id: dealHelpfulVotes.id })
-    .from(dealHelpfulVotes)
-    .where(
-      and(eq(dealHelpfulVotes.dealId, dealId), eq(dealHelpfulVotes.sessionHash, identity.sessionHash)),
-    )
-    .limit(1);
-
-  if (existingGuest) {
+    const inserted = await db
+      .insert(dealHelpfulVotes)
+      .values({ dealId, userId: identity.userId })
+      .onConflictDoNothing()
+      .returning({ id: dealHelpfulVotes.id });
+    if (inserted.length > 0) {
+      const [updated] = await db
+        .update(deals)
+        .set({ helpfulCount: sql`${deals.helpfulCount} + 1` })
+        .where(eq(deals.id, dealId))
+        .returning({ helpfulCount: deals.helpfulCount });
+      return { voted: true, helpfulCount: updated?.helpfulCount ?? deal.helpfulCount + 1 };
+    }
     return { voted: true, helpfulCount: deal.helpfulCount };
   }
 
-  await db.insert(dealHelpfulVotes).values({ dealId, sessionHash: identity.sessionHash });
-  const next = deal.helpfulCount + 1;
-  await db.update(deals).set({ helpfulCount: next }).where(eq(deals.id, dealId));
-  return { voted: true, helpfulCount: next };
+  const inserted = await db
+    .insert(dealHelpfulVotes)
+    .values({ dealId, sessionHash: identity.sessionHash })
+    .onConflictDoNothing()
+    .returning({ id: dealHelpfulVotes.id });
+
+  if (inserted.length > 0) {
+    const [updated] = await db
+      .update(deals)
+      .set({ helpfulCount: sql`${deals.helpfulCount} + 1` })
+      .where(eq(deals.id, dealId))
+      .returning({ helpfulCount: deals.helpfulCount });
+    return { voted: true, helpfulCount: updated?.helpfulCount ?? deal.helpfulCount + 1 };
+  }
+
+  return { voted: true, helpfulCount: deal.helpfulCount };
 }

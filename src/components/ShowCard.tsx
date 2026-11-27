@@ -37,7 +37,9 @@ export function ShowCard({
     : isEventView && show.eventHighlight
       ? show.eventHighlight.dealType === "SINGALONG"
         ? "싱어롱"
-        : "스페셜 커튼콜"
+        : show.eventHighlight.dealType === "SPECIAL_DAY"
+          ? "스페셜 데이"
+          : "스페셜 커튼콜"
       : show.primaryDealType === "TIMESALE" && show.isUnconditional
         ? "무조건 할인"
         : DEAL_TYPE_LABELS[show.primaryDealType];
@@ -118,9 +120,6 @@ export function ShowCard({
               <span className="text-sm font-semibold text-on-surface">특별 할인</span>
             ) : (
               <span className="text-sm font-semibold text-primary">특전 · 이벤트 진행 중</span>
-            )}
-            {show.basePrice !== null && show.lowestPrice !== null && show.basePrice > show.lowestPrice && (
-              <span className="text-xs text-hint line-through">{formatKrw(show.basePrice)}</span>
             )}
           </div>
         )}

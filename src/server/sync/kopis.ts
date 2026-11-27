@@ -10,6 +10,7 @@ import {
   type SubRegion,
 } from "@/db/schema";
 import { formatKstDate } from "@/lib/kst";
+import { normalizeExternalHttpsUrl } from "@/lib/url";
 import { isKidsMusical } from "./kids-filter";
 
 const DAEHAKRO_KEYWORDS = ["대학로", "동숭동", "혜화동", "명륜", "이화동", "연건동"];
@@ -130,12 +131,21 @@ function xmlTag(block: string, tag: string): string {
 }
 
 function toHttpsKopisUrl(raw: string | null | undefined): string | null {
-  const trimmed = raw?.trim();
-  if (!trimmed) return null;
-  if (trimmed.startsWith("http://www.kopis.or.kr/")) {
-    return trimmed.replace(/^http:\/\//, "https://");
+  return normalizeExternalHttpsUrl(raw, "https://www.kopis.or.kr");
+}
+
+async function fetchKopisWithTimeout(
+  fetchImpl: typeof fetch,
+  url: string,
+  timeoutMs = 12_000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error(`KOPIS fetch timeout (${timeoutMs}ms)`)), timeoutMs);
+  try {
+    return await fetchImpl(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
   }
-  return trimmed.startsWith("https://") || trimmed.startsWith("http://") ? trimmed : null;
 }
 
 /** Extract NOL, YES24, and L.TICKET product IDs from KOPIS <relates> block (Ticketlink intentionally excluded). */
@@ -297,7 +307,7 @@ export async function syncKopisShows(
         const listUrl = `https://www.kopis.or.kr/openApi/restful/pblprfr?service=${encodeURIComponent(
           apiKey,
         )}&stdate=${stdate}&eddate=${eddate}&cpage=${page}&rows=100&shcate=GGGA&kidstate=N${stateParam}`;
-        const res = await fetchImpl(listUrl);
+        const res = await fetchKopisWithTimeout(fetchImpl, listUrl);
         if (!res.ok) throw new Error(`KOPIS list HTTP ${res.status}`);
         const pageItems = parseKopisXmlList(await res.text());
         for (const item of pageItems) {
@@ -323,173 +333,192 @@ export async function syncKopisShows(
     let detailFetchCount = 0;
 
     for (const item of list) {
-      const normTitle = normalizeTitle(item.title);
-      const [existing] = await db
-        .select({
-          id: shows.id,
-          kopisId: shows.kopisId,
-          basePricesJson: shows.basePricesJson,
-          venueAddress: shows.venueAddress,
-          channelLinksJson: shows.channelLinksJson,
-          synopsisImageUrl: shows.synopsisImageUrl,
-        })
-        .from(shows)
-        .where(
-          or(
-            eq(shows.kopisId, item.kopisId),
-            and(
-              like(shows.kopisId, "XLSX_%"),
-              eq(shows.normalizedTitle, normTitle),
-              eq(shows.startDate, item.startDate),
+      try {
+        const normTitle = normalizeTitle(item.title);
+        // Prefer exact kopisId match before falling back to XLSX_% legacy rows
+        const matchedRows = await db
+          .select({
+            id: shows.id,
+            kopisId: shows.kopisId,
+            posterUrl: shows.posterUrl,
+            subRegion: shows.subRegion,
+            basePricesJson: shows.basePricesJson,
+            venueAddress: shows.venueAddress,
+            channelLinksJson: shows.channelLinksJson,
+            synopsisImageUrl: shows.synopsisImageUrl,
+          })
+          .from(shows)
+          .where(
+            or(
+              eq(shows.kopisId, item.kopisId),
+              and(
+                like(shows.kopisId, "XLSX_%"),
+                eq(shows.normalizedTitle, normTitle),
+                eq(shows.startDate, item.startDate),
+              ),
             ),
-          ),
-        )
-        .limit(1);
+          )
+          .limit(2);
 
-      const needsDetail =
-        !existing ||
-        (!existing.basePricesJson && !existing.venueAddress) ||
-        !existing.channelLinksJson ||
-        !existing.synopsisImageUrl;
-      let detail: KopisShowDetail | null = null;
-      let venueAddress: string | null = existing?.venueAddress ?? null;
+        const existing = matchedRows.find((r) => r.kopisId === item.kopisId) ?? matchedRows[0];
 
-      if (needsDetail && detailFetchCount < maxDetailFetches) {
-        if (detailFetchCount > 0 && requestDelayMs > 0) await delay(requestDelayMs);
-        detailFetchCount += 1;
-        try {
-          const dRes = await fetchImpl(
-            `https://www.kopis.or.kr/openApi/restful/pblprfr/${encodeURIComponent(item.kopisId)}?service=${encodeURIComponent(apiKey)}`,
-          );
-          if (dRes.ok) detail = parseKopisXmlDetail(await dRes.text());
-          if (detail?.venueId && !venueAddress) {
-            if (venueAddressCache.has(detail.venueId)) {
-              venueAddress = venueAddressCache.get(detail.venueId) ?? null;
-            } else {
-              if (requestDelayMs > 0) await delay(requestDelayMs);
-              const vRes = await fetchImpl(
-                `https://www.kopis.or.kr/openApi/restful/prfplc/${encodeURIComponent(detail.venueId)}?service=${encodeURIComponent(apiKey)}`,
-              );
-              const addr = vRes.ok ? xmlTag(await vRes.text(), "adres") || null : null;
-              venueAddressCache.set(detail.venueId, addr);
-              venueAddress = addr;
+        const needsDetail =
+          !existing ||
+          (!existing.basePricesJson && !existing.venueAddress) ||
+          !existing.channelLinksJson ||
+          !existing.synopsisImageUrl;
+        let detail: KopisShowDetail | null = null;
+        let venueAddress: string | null = existing?.venueAddress ?? null;
+
+        if (needsDetail && detailFetchCount < maxDetailFetches) {
+          if (detailFetchCount > 0 && requestDelayMs > 0) await delay(requestDelayMs);
+          detailFetchCount += 1;
+          try {
+            const dRes = await fetchKopisWithTimeout(
+              fetchImpl,
+              `https://www.kopis.or.kr/openApi/restful/pblprfr/${encodeURIComponent(item.kopisId)}?service=${encodeURIComponent(apiKey)}`,
+            );
+            if (dRes.ok) detail = parseKopisXmlDetail(await dRes.text());
+            if (detail?.venueId && !venueAddress) {
+              if (venueAddressCache.has(detail.venueId)) {
+                venueAddress = venueAddressCache.get(detail.venueId) ?? null;
+              } else {
+                if (requestDelayMs > 0) await delay(requestDelayMs);
+                const vRes = await fetchKopisWithTimeout(
+                  fetchImpl,
+                  `https://www.kopis.or.kr/openApi/restful/prfplc/${encodeURIComponent(detail.venueId)}?service=${encodeURIComponent(apiKey)}`,
+                );
+                const addr = vRes.ok ? xmlTag(await vRes.text(), "adres") || null : null;
+                venueAddressCache.set(detail.venueId, addr);
+                venueAddress = addr;
+              }
             }
+          } catch {
+            // Preserve list item upsert even if detail lookup fails
           }
-        } catch {
-          // Preserve list item upsert even if detail lookup fails
         }
-      }
 
-      const subRegion = classifySubRegion(item.region, venueAddress, item.venueName, detail?.isDaehakro);
-      const basePrices = parseBasePricesText(detail?.pcseguidance);
-      const mergedLinks: ChannelLinks = {
-        ...parseChannelLinks(existing?.channelLinksJson),
-        ...(detail?.channelLinks ?? {}),
-      };
-      const hasLinks = Object.keys(mergedLinks).length > 0;
-      const synopsisImageUrl = existing?.synopsisImageUrl ?? detail?.synopsisImageUrl ?? null;
-      const status = mapKopisState(item.state, item.startDate, todayKst);
-      const nowIso = now.toISOString();
+        const computedSubRegion = classifySubRegion(item.region, venueAddress, item.venueName, detail?.isDaehakro);
+        const subRegion = !detail && existing?.subRegion === "DAEHAKRO" ? "DAEHAKRO" : computedSubRegion;
+        const posterUrl = item.posterUrl ?? existing?.posterUrl ?? null;
+        const basePrices = parseBasePricesText(detail?.pcseguidance);
+        const mergedLinks: ChannelLinks = {
+          ...parseChannelLinks(existing?.channelLinksJson),
+          ...(detail?.channelLinks ?? {}),
+        };
+        const hasLinks = Object.keys(mergedLinks).length > 0;
+        const synopsisImageUrl = existing?.synopsisImageUrl ?? detail?.synopsisImageUrl ?? null;
+        const status = mapKopisState(item.state, item.startDate, todayKst);
+        const nowIso = now.toISOString();
 
-      let showId: number;
-      if (existing) {
-        showId = existing.id;
-        await db
-          .update(shows)
-          .set({
-            kopisId: item.kopisId,
-            title: item.title,
-            normalizedTitle: normalizeTitle(item.title),
-            posterUrl: item.posterUrl,
-            venueName: item.venueName,
-            ...(venueAddress ? { venueAddress } : {}),
-            region: item.region,
-            subRegion,
-            startDate: item.startDate,
-            endDate: item.endDate,
-            ...(basePrices ? { basePricesJson: JSON.stringify(basePrices) } : {}),
-            ...(hasLinks ? { channelLinksJson: JSON.stringify(mergedLinks) } : {}),
-            ...(synopsisImageUrl ? { synopsisImageUrl } : {}),
-            status,
-            updatedAt: nowIso,
-          })
-          .where(eq(shows.id, showId));
-      } else {
-        const [inserted] = await db
-          .insert(shows)
-          .values({
-            kopisId: item.kopisId,
-            title: item.title,
-            normalizedTitle: normalizeTitle(item.title),
-            posterUrl: item.posterUrl,
-            venueName: item.venueName,
-            venueAddress,
-            region: item.region,
-            subRegion,
-            startDate: item.startDate,
-            endDate: item.endDate,
-            basePricesJson: basePrices ? JSON.stringify(basePrices) : null,
-            channelLinksJson: hasLinks ? JSON.stringify(mergedLinks) : null,
-            synopsisImageUrl,
-            status,
-          })
-          .returning({ id: shows.id });
-        showId = inserted.id;
-      }
-
-      // Fallback cast from KOPIS prfcast (later enriched with full role/photo cast by NOL & YES24 adapters)
-      const castNames = parseCastText(detail?.prfcast);
-      const linkedActorIds: number[] = [];
-      for (const name of castNames) {
-        const norm = name.replace(/\s+/g, "").toLowerCase();
-        const [foundActor] = await db
-          .select({ id: actors.id })
-          .from(actors)
-          .where(eq(actors.normalizedName, norm))
-          .limit(1);
-
-        let actorId: number;
-        if (foundActor) {
-          actorId = foundActor.id;
-        } else {
-          const [createdActor] = await db
-            .insert(actors)
-            .values({ name, normalizedName: norm })
-            .returning({ id: actors.id });
-          actorId = createdActor.id;
-        }
-        linkedActorIds.push(actorId);
-        await db
-          .insert(showActors)
-          .values({ showId, actorId, sourceType: "KOPIS" })
-          .onConflictDoNothing();
-      }
-
-      if (!existing && linkedActorIds.length > 0) {
-        const followers = await db
-          .select({ userId: userActorFollows.userId, actorId: userActorFollows.actorId })
-          .from(userActorFollows)
-          .where(inArray(userActorFollows.actorId, linkedActorIds));
-
-        if (followers.length > 0) {
+        let showId: number;
+        if (existing) {
+          showId = existing.id;
           await db
-            .insert(userNotifications)
-            .values(
-              followers.map((f) => ({
-                userId: f.userId,
-                notiType: "FOLLOWED_ACTOR_NEW_SHOW" as const,
-                showId,
-                actorId: f.actorId,
-                title: `신규 출연작 등록 · ${item.title}`,
-                body: `${item.venueName} (${item.startDate} ~ ${item.endDate})`,
-                dedupKey: `new-show:${showId}:u:${f.userId}`,
-              })),
-            )
+            .update(shows)
+            .set({
+              kopisId: item.kopisId,
+              title: item.title,
+              normalizedTitle: normalizeTitle(item.title),
+              ...(posterUrl ? { posterUrl } : {}),
+              venueName: item.venueName,
+              ...(venueAddress ? { venueAddress } : {}),
+              region: item.region,
+              subRegion,
+              startDate: item.startDate,
+              endDate: item.endDate,
+              ...(basePrices ? { basePricesJson: JSON.stringify(basePrices) } : {}),
+              ...(hasLinks ? { channelLinksJson: JSON.stringify(mergedLinks) } : {}),
+              ...(synopsisImageUrl ? { synopsisImageUrl } : {}),
+              status,
+              updatedAt: nowIso,
+            })
+            .where(eq(shows.id, showId));
+        } else {
+          const [inserted] = await db
+            .insert(shows)
+            .values({
+              kopisId: item.kopisId,
+              title: item.title,
+              normalizedTitle: normalizeTitle(item.title),
+              posterUrl,
+              venueName: item.venueName,
+              venueAddress,
+              region: item.region,
+              subRegion,
+              startDate: item.startDate,
+              endDate: item.endDate,
+              basePricesJson: basePrices ? JSON.stringify(basePrices) : null,
+              channelLinksJson: hasLinks ? JSON.stringify(mergedLinks) : null,
+              synopsisImageUrl,
+              status,
+            })
+            .returning({ id: shows.id });
+          showId = inserted.id;
+        }
+
+        // Fallback cast from KOPIS prfcast (later enriched with full role/photo cast by NOL & YES24 adapters)
+        const castNames = parseCastText(detail?.prfcast);
+        const linkedActorIds: number[] = [];
+        for (const name of castNames) {
+          const norm = name.replace(/\s+/g, "").toLowerCase();
+          const [foundActor] = await db
+            .select({ id: actors.id })
+            .from(actors)
+            .where(eq(actors.normalizedName, norm))
+            .limit(1);
+
+          let actorId: number;
+          if (foundActor) {
+            actorId = foundActor.id;
+          } else {
+            const [createdActor] = await db
+              .insert(actors)
+              .values({ name, normalizedName: norm })
+              .returning({ id: actors.id });
+            actorId = createdActor.id;
+          }
+          linkedActorIds.push(actorId);
+          await db
+            .insert(showActors)
+            .values({ showId, actorId, sourceType: "KOPIS" })
             .onConflictDoNothing();
         }
-      }
 
-      synced += 1;
+        if (!existing && linkedActorIds.length > 0) {
+          const followers: Array<{ userId: number; actorId: number }> = [];
+          for (let i = 0; i < linkedActorIds.length; i += 50) {
+            const batchIds = linkedActorIds.slice(i, i + 50);
+            const rows = await db
+              .select({ userId: userActorFollows.userId, actorId: userActorFollows.actorId })
+              .from(userActorFollows)
+              .where(inArray(userActorFollows.actorId, batchIds));
+            followers.push(...rows);
+          }
+
+          for (let i = 0; i < followers.length; i += 8) {
+            const batch = followers.slice(i, i + 8);
+            await db
+              .insert(userNotifications)
+              .values(
+                batch.map((f) => ({
+                  userId: f.userId,
+                  notiType: "FOLLOWED_ACTOR_NEW_SHOW" as const,
+                  showId,
+                  actorId: f.actorId,
+                  title: `신규 출연작 등록 · ${item.title}`,
+                  body: `${item.venueName} (${item.startDate} ~ ${item.endDate})`,
+                  dedupKey: `new-show:${showId}:u:${f.userId}`,
+                })),
+              )
+              .onConflictDoNothing();
+          }
+        }
+
+        synced += 1;
+      } catch {
+        // Isolate per-show upsert/cast errors so the rest of KOPIS sync completes
+      }
     }
 
     await db
