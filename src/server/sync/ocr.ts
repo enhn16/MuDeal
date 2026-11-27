@@ -2,7 +2,7 @@ import { and, asc, eq, gte, isNotNull, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { AppDb } from "@/db/client";
 import { CONDITION_TAGS, deals, ocrImageJobs, shows, type ConditionTag } from "@/db/schema";
-import { formatKstDate, normalizeEventDates, startOfKstDayUtc } from "@/lib/kst";
+import { extractDiscountDatesFromLabel, formatKstDate, normalizeEventDates, startOfKstDayUtc } from "@/lib/kst";
 import { sha256Hex } from "@/lib/jwt";
 import { recomputeShowPriceCache } from "@/server/modules/reports";
 import { classifyDiscountLabel, hasMeaningfulBenefit, isStatutoryDiscount } from "./benefit-filter";
@@ -34,6 +34,7 @@ export const OcrExtractSchema = z.object({
           .transform((arr) => arr.filter((t): t is ConditionTag => VALID_CONDITION_TAGS.has(t))),
         conditionSummary: z.string().max(200).catch(""),
         expiresAtKst: z.string().nullable().catch(null),
+        applicableDates: z.array(z.string()).default([]),
       }),
     )
     .default([]),
@@ -88,8 +89,9 @@ export function createGeminiVisionExtractor(apiKey: string): VisionExtractor {
       periodHint +
       '한국 뮤지컬 예매처 공지 이미지에서 일반 관객이 받을 수 있는 특별 할인(타임세일·조기예매·프리뷰·마티네·재관람·학생/수험생·군인·직장인·지역주민·패키지·카드특가·무조건 할인)과 현장 이벤트(싱어롱·스페셜 커튼콜·포토카드/굿즈 특전·스페셜 데이)만 추출해 아래 JSON 스키마로 반환하세요. ' +
       '국가유공자·장애인·복지·경로우대·보훈·임산부·다자녀·문화누리 등 법정·복지 할인은 반드시 제외하고, 마티네/군인/수험생/직장인/재관람/지역주민/패키지/카드 할인은 isUnconditional=false로 표시하세요. ' +
+      '할인의 경우 예매(판매) 마감일시는 expiresAtKst("YYYY-MM-DDTHH:MM:SS")에, 적용되는 공연(관람) 기간/날짜는 applicableDates(["YYYY-MM-DD"])에 각각 구분해서 추출하세요. ' +
       '특전·싱어롱·커튼콜·스페셜 데이의 진행 날짜 또는 기간(예: 11/24~11/29, 12월 5일(토))이 이미지에 있으면 반드시 eventDates에 ["YYYY-MM-DD"] 형태로 빠짐없이 추출하세요(짧은 연속 기간은 날짜를 모두 나열). 이미지에 연도가 생략된 경우 반드시 위 공연 기간 및 오늘 날짜에 맞는 연도를 사용하고 과거 임의 연도를 지어내지 마세요. 관련 혜택이 없으면 hasRelevantInfo=false로 반환하세요. ' +
-      '{"hasRelevantInfo":boolean,"confidence":0~1,"discounts":[{"seatGrade":"VIP"|"R"|"S"|"A"|"ALL","salePrice":integer|null,"discountRate":1~99|null,"isUnconditional":boolean,"conditionTags":["MATINEE"|"REWATCH"|"YOUTH_STUDENT"|"MILITARY_PUBLIC"|"OFFICE_WORKER"|"LOCAL_RESIDENT"|"GROUP_PACKAGE"|"CARD_PARTNER"|"EVENT_CONDITION"],"conditionSummary":string,"expiresAtKst":"YYYY-MM-DDTHH:MM:SS"|null}],"events":[{"dealType":"SINGALONG"|"CURTAIN_CALL"|"PERK_GOODS"|"SPECIAL_DAY","eventDates":["YYYY-MM-DD"],"perkSummary":string|null,"conditionSummary":string|null}]}';
+      '{"hasRelevantInfo":boolean,"confidence":0~1,"discounts":[{"seatGrade":"VIP"|"R"|"S"|"A"|"ALL","salePrice":integer|null,"discountRate":1~99|null,"isUnconditional":boolean,"conditionTags":["MATINEE"|"REWATCH"|"YOUTH_STUDENT"|"MILITARY_PUBLIC"|"OFFICE_WORKER"|"LOCAL_RESIDENT"|"GROUP_PACKAGE"|"CARD_PARTNER"|"EVENT_CONDITION"],"conditionSummary":string,"expiresAtKst":"YYYY-MM-DDTHH:MM:SS"|null,"applicableDates":["YYYY-MM-DD"]}],"events":[{"dealType":"SINGALONG"|"CURTAIN_CALL"|"PERK_GOODS"|"SPECIAL_DAY","eventDates":["YYYY-MM-DD"],"perkSummary":string|null,"conditionSummary":string|null}]}';
 
     const b64 = arrayBufferToBase64(imageBytes);
     let lastStatus = 500;
@@ -351,6 +353,49 @@ export async function processPendingOcrJobs(
         const dealStatus =
           job.showId !== null && extracted.confidence >= AUTO_PUBLISH_CONFIDENCE ? "ACTIVE" : "DRAFT";
 
+        const existingShowDeals =
+          job.showId !== null
+            ? await db
+                .select({
+                  id: deals.id,
+                  seatGrade: deals.seatGrade,
+                  discountRate: deals.discountRate,
+                  conditionSummary: deals.conditionSummary,
+                  expiresAt: deals.expiresAt,
+                  eventDatesJson: deals.eventDatesJson,
+                  adminLocked: deals.adminLocked,
+                })
+                .from(deals)
+                .where(
+                  and(
+                    eq(deals.showId, job.showId),
+                    eq(deals.channelName, job.sourceChannel),
+                    eq(deals.status, "ACTIVE"),
+                  ),
+                )
+            : [];
+
+        const discountMatchKeywords = [
+          "타임세일",
+          "타임특가",
+          "프리뷰",
+          "오프닝",
+          "조기예매",
+          "얼리버드",
+          "마티네",
+          "수험생",
+          "재관람",
+          "슈가",
+          "크리스마스",
+          "연말",
+          "위크",
+          "굿바이",
+          "파이널",
+          "직장인",
+          "학생",
+          "군인",
+        ];
+
         for (const d of extracted.discounts) {
           const classified = classifyDiscountLabel(d.conditionSummary);
           const mergedTags = Array.from(new Set<ConditionTag>([...d.conditionTags, ...classified.conditionTags]));
@@ -368,23 +413,90 @@ export async function processPendingOcrJobs(
           ) {
             continue;
           }
-          await db.insert(deals).values({
-            showId: job.showId,
-            channelName: job.sourceChannel,
-            dealType: classified.dealType,
-            seatGrade: d.seatGrade,
-            salePrice: d.salePrice,
-            discountRate: d.discountRate,
-            isUnconditional: isUnconditional ? 1 : 0,
-            conditionTagsJson: mergedTags.length ? JSON.stringify(mergedTags) : null,
-            conditionSummary: d.conditionSummary,
-            externalUrl: job.sourcePageUrl,
-            expiresAt: d.expiresAtKst ? new Date(`${d.expiresAtKst}+09:00`).toISOString() : null,
-            status: dealStatus,
-            sourceType: "OCR_APPROVED",
-            sourceOcrJobId: job.id,
+
+          const labelDates = extractDiscountDatesFromLabel(d.conditionSummary, {
+            showStartDate: showMeta?.startDate,
+            showEndDate: showMeta?.endDate,
+            now,
           });
-          draftsCreated += 1;
+          const applicableDates = normalizeEventDates(
+            d.applicableDates.length > 0 ? d.applicableDates : labelDates.applicableDates,
+            {
+              showStartDate: showMeta?.startDate,
+              showEndDate: showMeta?.endDate,
+              now,
+            },
+          );
+          let parsedExpiresAt: string | null = null;
+          if (d.expiresAtKst) {
+            const rawDatePart = d.expiresAtKst.slice(0, 10);
+            const normExpDate = normalizeEventDates([rawDatePart], {
+              showStartDate: showMeta?.startDate,
+              showEndDate: showMeta?.endDate,
+              now,
+            })[0];
+            if (normExpDate) {
+              const timePart = /T(\d{2}:\d{2}:\d{2})/.exec(d.expiresAtKst)?.[1] ?? "23:59:59";
+              parsedExpiresAt = new Date(`${normExpDate}T${timePart}+09:00`).toISOString();
+            }
+          }
+          const finalExpiresAt = parsedExpiresAt ?? labelDates.bookingExpiresAt;
+          // Skip OCR discounts whose booking deadline or applicable dates already passed
+          if (finalExpiresAt && Date.parse(finalExpiresAt) < now.getTime()) continue;
+          const latestApplicable = applicableDates.at(-1) ?? null;
+          if (latestApplicable && latestApplicable < todayKst) continue;
+
+          // If this OCR discount matches existing structured deals on the same show+channel, enrich their dates in-place!
+          const kw = discountMatchKeywords.find((k) => d.conditionSummary.includes(k));
+          let enrichedExisting = false;
+          if (existingShowDeals.length > 0 && (finalExpiresAt || applicableDates.length > 0)) {
+            const matched = existingShowDeals.filter((ex) => {
+              if (ex.adminLocked === 1) return false;
+              const gradeOk = d.seatGrade === "ALL" || ex.seatGrade === d.seatGrade;
+              if (!gradeOk) return false;
+              const sum = ex.conditionSummary ?? "";
+              if (kw && sum.includes(kw)) return true;
+              if (d.discountRate !== null && ex.discountRate === d.discountRate && d.salePrice === null) {
+                return kw ? sum.includes(kw) : false;
+              }
+              return false;
+            });
+            for (const ex of matched) {
+              const patch: Partial<typeof deals.$inferInsert> = {};
+              if (finalExpiresAt && !ex.expiresAt) patch.expiresAt = finalExpiresAt;
+              if (applicableDates.length > 0 && !ex.eventDatesJson) {
+                patch.eventDatesJson = JSON.stringify(applicableDates);
+              }
+              if (Object.keys(patch).length > 0) {
+                await db
+                  .update(deals)
+                  .set({ ...patch, updatedAt: new Date().toISOString() })
+                  .where(eq(deals.id, ex.id));
+                enrichedExisting = true;
+              }
+            }
+          }
+
+          if (!enrichedExisting) {
+            await db.insert(deals).values({
+              showId: job.showId,
+              channelName: job.sourceChannel,
+              dealType: classified.dealType,
+              seatGrade: d.seatGrade,
+              salePrice: d.salePrice,
+              discountRate: d.discountRate,
+              isUnconditional: isUnconditional ? 1 : 0,
+              conditionTagsJson: mergedTags.length ? JSON.stringify(mergedTags) : null,
+              conditionSummary: d.conditionSummary,
+              eventDatesJson: applicableDates.length > 0 ? JSON.stringify(applicableDates) : null,
+              externalUrl: job.sourcePageUrl,
+              expiresAt: finalExpiresAt,
+              status: dealStatus,
+              sourceType: "OCR_APPROVED",
+              sourceOcrJobId: job.id,
+            });
+            draftsCreated += 1;
+          }
         }
 
         for (const ev of extracted.events) {

@@ -17,7 +17,10 @@ import {
 } from "@/db/schema";
 import {
   calcKstDDay,
+  compareDatedBenefitPriority,
+  extractDiscountDatesFromLabel,
   formatKstDate,
+  isDealActiveNow,
   isExpired,
   normalizeEventDates,
   resolveDatePreset,
@@ -79,6 +82,8 @@ export interface ShowCardItem {
   maxDiscountRate: number | null;
   primaryDealType: DealType;
   categories: HomeCategory[];
+  discountDates: string[];
+  discountExpiresAt: string | null;
   perkHighlight: string | null;
   perkDates: string[];
   eventHighlight: {
@@ -128,52 +133,102 @@ function toShowCard(
   now: Date,
   preferUnconditional = true,
 ): ShowCardItem {
-  const priced = showDeals.filter((d) => d.salePrice !== null).sort(compareDealsForDisplay);
-  const unconditionalPriced = priced.filter((d) => Boolean(d.isUnconditional));
-  const headlinePool = preferUnconditional && unconditionalPriced.length > 0 ? unconditionalPriced : priced;
-  const topDeal = headlinePool[0] ?? showDeals[0];
-  const channels = new Set(showDeals.map((d) => d.channelName));
-  const withExpiry = showDeals
-    .map((d) => d.expiresAt)
-    .filter((v): v is string => Boolean(v))
-    .sort();
-  const earliestExpiresAt = withExpiry[0] ?? null;
-  const userReport = showDeals.find((d) => d.sourceType === "USER_REPORT");
-  const categories = HOME_CATEGORIES.filter((cat) =>
-    showDeals.some((d) => dealMatchesCategory(d, cat)),
-  );
-  const resolveDealDates = (d: typeof deals.$inferSelect) =>
+  const todayKst = formatKstDate(now);
+  const resolveEventDates = (d: typeof deals.$inferSelect) =>
     normalizeEventDates(parseJsonArray<string>(d.eventDatesJson), {
       showStartDate: show.startDate,
       showEndDate: show.endDate,
       fallbackText: [d.conditionSummary, d.perkSummary].filter(Boolean).join(" "),
       now,
     });
+  const resolveDiscountMeta = (d: typeof deals.$inferSelect) => {
+    const rawDates = parseJsonArray<string>(d.eventDatesJson);
+    const labelDates =
+      rawDates.length === 0 || !d.expiresAt
+        ? extractDiscountDatesFromLabel(d.conditionSummary, {
+            showStartDate: show.startDate,
+            showEndDate: show.endDate,
+            now,
+          })
+        : { bookingExpiresAt: null, applicableDates: [] };
+    const eventDates =
+      rawDates.length > 0
+        ? normalizeEventDates(rawDates, { showStartDate: show.startDate, showEndDate: show.endDate, now })
+        : labelDates.applicableDates;
+    const expiresAt = d.expiresAt ?? labelDates.bookingExpiresAt;
+    return { eventDates, expiresAt };
+  };
 
-  const perkCandidates = showDeals.filter(
-    (d) => d.dealType === "PERK_GOODS" || Boolean(d.perkSummary?.trim()),
+  // Pick currently applicable unconditional largest discount first (rate DESC -> salePrice ASC)
+  const pricedWithMeta = showDeals
+    .filter((d) => d.salePrice !== null || d.discountRate !== null)
+    .map((deal) => ({ deal, ...resolveDiscountMeta(deal) }));
+  const currentlyActivePriced = pricedWithMeta.filter((x) =>
+    isDealActiveNow({ opensAt: x.deal.opensAt, expiresAt: x.expiresAt, eventDates: x.eventDates }, now),
   );
-  const perkDeal =
-    perkCandidates.find((d) => d.dealType === "PERK_GOODS" && resolveDealDates(d).length > 0) ??
-    perkCandidates.find((d) => d.dealType === "PERK_GOODS") ??
-    perkCandidates.find((d) => resolveDealDates(d).length > 0) ??
-    perkCandidates[0];
-  const perkDates = perkDeal ? resolveDealDates(perkDeal) : [];
+  const activePool = currentlyActivePriced.length > 0 ? currentlyActivePriced : pricedWithMeta;
+  const sortBiggestDiscountFirst = (
+    a: (typeof pricedWithMeta)[number],
+    b: (typeof pricedWithMeta)[number],
+  ) => {
+    const rateA = a.deal.discountRate ?? -1;
+    const rateB = b.deal.discountRate ?? -1;
+    if (rateA !== rateB) return rateB - rateA;
+    return compareDealsForDisplay(a.deal, b.deal);
+  };
+  const unconditionalPriced = activePool
+    .filter((x) => Boolean(x.deal.isUnconditional))
+    .sort(sortBiggestDiscountFirst);
+  const sortedAllPriced = [...activePool].sort(sortBiggestDiscountFirst);
+  const headlinePool =
+    preferUnconditional && unconditionalPriced.length > 0 ? unconditionalPriced : sortedAllPriced;
+  const topEntry = headlinePool[0] ?? null;
+  const topDeal = topEntry?.deal ?? showDeals[0];
 
-  const eventCandidates = showDeals.filter(
-    (d) =>
-      d.dealType === "SINGALONG" ||
-      d.dealType === "CURTAIN_CALL" ||
-      (d.dealType === "SPECIAL_DAY" && d.salePrice === null && d.discountRate === null),
+  const channels = new Set(showDeals.map((d) => d.channelName));
+  const withExpiry = showDeals
+    .map((d) => d.expiresAt)
+    .filter((v): v is string => Boolean(v))
+    .sort();
+  const earliestExpiresAt = topEntry?.expiresAt ?? withExpiry[0] ?? null;
+  const userReport = showDeals.find((d) => d.sourceType === "USER_REPORT");
+  const categories = HOME_CATEGORIES.filter((cat) =>
+    showDeals.some((d) => dealMatchesCategory(d, cat)),
   );
-  const eventDeal =
-    eventCandidates.find(
-      (d) => (d.dealType === "SINGALONG" || d.dealType === "CURTAIN_CALL") && resolveDealDates(d).length > 0,
-    ) ??
-    eventCandidates.find((d) => d.dealType === "SINGALONG" || d.dealType === "CURTAIN_CALL") ??
-    eventCandidates.find((d) => resolveDealDates(d).length > 0) ??
-    eventCandidates[0];
-  const eventDates = eventDeal ? resolveDealDates(eventDeal) : [];
+
+  // Pick currently active or earliest upcoming perk first
+  const perkEntries = showDeals
+    .filter((d) => d.dealType === "PERK_GOODS" || Boolean(d.perkSummary?.trim()))
+    .map((deal) => ({ deal, dates: resolveEventDates(deal) }))
+    .filter((x) => x.dates.length === 0 || x.dates[x.dates.length - 1] >= todayKst)
+    .sort(
+      (a, b) =>
+        compareDatedBenefitPriority(a.dates, b.dates, todayKst) ||
+        (a.deal.dealType === "PERK_GOODS" ? 0 : 1) - (b.deal.dealType === "PERK_GOODS" ? 0 : 1),
+    );
+  const perkEntry = perkEntries[0] ?? null;
+  const perkDeal = perkEntry?.deal ?? null;
+  const perkDates = perkEntry?.dates ?? [];
+
+  // Pick currently active or earliest upcoming singalong/curtain-call/special-day first
+  const eventEntries = showDeals
+    .filter(
+      (d) =>
+        d.dealType === "SINGALONG" ||
+        d.dealType === "CURTAIN_CALL" ||
+        (d.dealType === "SPECIAL_DAY" && d.salePrice === null && d.discountRate === null),
+    )
+    .map((deal) => ({ deal, dates: resolveEventDates(deal) }))
+    .filter((x) => x.dates.length === 0 || x.dates[x.dates.length - 1] >= todayKst)
+    .sort(
+      (a, b) =>
+        compareDatedBenefitPriority(a.dates, b.dates, todayKst) ||
+        (a.deal.dealType === "SINGALONG" || a.deal.dealType === "CURTAIN_CALL" ? 0 : 1) -
+          (b.deal.dealType === "SINGALONG" || b.deal.dealType === "CURTAIN_CALL" ? 0 : 1),
+    );
+  const eventEntry = eventEntries[0] ?? null;
+  const eventDeal = eventEntry?.deal ?? null;
+  const eventDates = eventEntry?.dates ?? [];
 
   return {
     id: show.id,
@@ -186,12 +241,11 @@ function toShowCard(
     channelCount: channels.size,
     lowestPrice: topDeal?.salePrice ?? null,
     basePrice: topDeal?.basePrice ?? null,
-    maxDiscountRate: (headlinePool.length > 0 ? headlinePool : showDeals).reduce<number | null>(
-      (max, d) => (d.discountRate !== null && (max === null || d.discountRate > max) ? d.discountRate : max),
-      null,
-    ),
+    maxDiscountRate: topDeal?.discountRate ?? null,
     primaryDealType: topDeal?.dealType ?? "TIMESALE",
     categories,
+    discountDates: topEntry?.eventDates ?? [],
+    discountExpiresAt: topEntry?.expiresAt ?? null,
     perkHighlight: perkDeal ? perkDeal.perkSummary?.trim() || perkDeal.conditionSummary || "현장 특전 증정" : null,
     perkDates,
     eventHighlight: eventDeal
@@ -583,30 +637,58 @@ export async function getShowDetail(db: AppDb, showId: number, now = new Date())
       .where(eq(showActors.showId, showId)),
   ]);
 
+  const todayKst = formatKstDate(now);
   const pricedDeals = dealRows
     .filter((d) => d.salePrice !== null || d.discountRate !== null || d.dealType === "LOTTERY")
-    .sort(compareDealsForDisplay)
-    .map((d) => ({
-      id: d.id,
-      channelName: d.channelName,
-      dealType: d.dealType,
-      seatGrade: d.seatGrade,
-      basePrice: d.basePrice,
-      salePrice: d.salePrice,
-      discountRate: d.discountRate,
-      isUnconditional: Boolean(d.isUnconditional),
-      conditionTags: parseJsonArray<ConditionTag>(d.conditionTagsJson),
-      conditionSummary: d.conditionSummary,
-      feeInfo: d.feeInfo,
-      externalUrl: d.externalUrl,
-      expiresAt: d.expiresAt,
-      dDay: d.expiresAt ? calcKstDDay(d.expiresAt, now) : null,
-      sourceType: d.sourceType,
-      reporterNickname: d.reporterNickname,
-      clickCount: d.clickCount,
-      helpfulCount: d.helpfulCount,
-      lastVerifiedAt: d.lastVerifiedAt,
-    }));
+    .map((d) => {
+      const rawDates = parseJsonArray<string>(d.eventDatesJson);
+      const labelDates =
+        rawDates.length === 0 || !d.expiresAt
+          ? extractDiscountDatesFromLabel(d.conditionSummary, {
+              showStartDate: show.startDate,
+              showEndDate: show.endDate,
+              now,
+            })
+          : { bookingExpiresAt: null, applicableDates: [] };
+      const eventDates =
+        rawDates.length > 0
+          ? normalizeEventDates(rawDates, { showStartDate: show.startDate, showEndDate: show.endDate, now })
+          : labelDates.applicableDates;
+      const effectiveExpiresAt = d.expiresAt ?? labelDates.bookingExpiresAt;
+      return {
+        id: d.id,
+        channelName: d.channelName,
+        dealType: d.dealType,
+        seatGrade: d.seatGrade,
+        basePrice: d.basePrice,
+        salePrice: d.salePrice,
+        discountRate: d.discountRate,
+        isUnconditional: Boolean(d.isUnconditional),
+        conditionTags: parseJsonArray<ConditionTag>(d.conditionTagsJson),
+        conditionSummary: d.conditionSummary,
+        feeInfo: d.feeInfo,
+        externalUrl: d.externalUrl,
+        opensAt: d.opensAt,
+        expiresAt: effectiveExpiresAt,
+        eventDates,
+        dDay: effectiveExpiresAt ? calcKstDDay(effectiveExpiresAt, now) : null,
+        sourceType: d.sourceType,
+        reporterNickname: d.reporterNickname,
+        clickCount: d.clickCount,
+        helpfulCount: d.helpfulCount,
+        lastVerifiedAt: d.lastVerifiedAt,
+      };
+    })
+    .filter((d) => isDealActiveNow({ opensAt: d.opensAt, expiresAt: d.expiresAt, eventDates: d.eventDates }, now))
+    .sort((a, b) => {
+      const uncA = a.isUnconditional ? 1 : 0;
+      const uncB = b.isUnconditional ? 1 : 0;
+      if (uncA !== uncB) return uncB - uncA;
+      const rateA = a.discountRate ?? -1;
+      const rateB = b.discountRate ?? -1;
+      if (rateA !== rateB) return rateB - rateA;
+      return compareDealsForDisplay(a, b);
+    });
 
   const events = dealRows
     .filter(
@@ -633,11 +715,8 @@ export async function getShowDetail(db: AppDb, showId: number, now = new Date())
       expiresAt: d.expiresAt,
       lastVerifiedAt: d.lastVerifiedAt,
     }))
-    .sort((a, b) => {
-      const aDate = a.eventDates[0] ?? "9999-12-31";
-      const bDate = b.eventDates[0] ?? "9999-12-31";
-      return aDate.localeCompare(bDate) || a.id - b.id;
-    });
+    .filter((ev) => ev.eventDates.length === 0 || ev.eventDates[ev.eventDates.length - 1] >= todayKst)
+    .sort((a, b) => compareDatedBenefitPriority(a.eventDates, b.eventDates, todayKst) || a.id - b.id);
 
   const seatGrades = Array.from(new Set(pricedDeals.map((d) => d.seatGrade)));
   const summary = summarizeLowestDeals(pricedDeals);

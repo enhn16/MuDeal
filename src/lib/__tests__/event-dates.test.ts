@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  compareDatedBenefitPriority,
   expandDateRange,
   extractDatesFromKoreanText,
+  extractDiscountDatesFromLabel,
+  formatBookingDeadline,
   formatEventDates,
   formatEventDateWithDow,
   normalizeEventDates,
@@ -62,5 +65,35 @@ describe("event date formatting & normalization", () => {
         now,
       }),
     ).toEqual(["2026-11-28", "2026-11-29"]);
+  });
+
+  it("extracts booking deadline and applicable performance dates separately from discount labels", () => {
+    const now = new Date("2026-11-27T03:00:00.000Z");
+    const early = extractDiscountDatesFromLabel("조기예매(~12/1까지 예매시)20%", { now });
+    expect(formatBookingDeadline(early.bookingExpiresAt)).toBe("~12.01(화)");
+    expect(early.applicableDates).toEqual([]);
+
+    const yearEnd = extractDiscountDatesFromLabel(
+      "연말 얼리버드 할인 (12월 24일~31일 전 회차, 11월 11일부터 12월 23일까지 예매 시 적용)",
+      { now },
+    );
+    expect(formatBookingDeadline(yearEnd.bookingExpiresAt)).toBe("~12.23(수)");
+    expect(yearEnd.applicableDates[0]).toBe("2026-12-24");
+    expect(yearEnd.applicableDates.at(-1)).toBe("2026-12-31");
+
+    const ageNoise = extractDiscountDatesFromLabel("실버 청춘 할인(1959년이전출생/본인만)50%", { now });
+    expect(ageNoise.bookingExpiresAt).toBeNull();
+    expect(ageNoise.applicableDates).toEqual([]);
+  });
+
+  it("ranks currently active benefits first, then earliest upcoming, then undated", () => {
+    const today = "2026-11-27";
+    const sorted = [
+      { id: "undated", dates: [] as string[] },
+      { id: "later", dates: ["2026-12-10"] },
+      { id: "sooner", dates: ["2026-11-29"] },
+      { id: "active", dates: ["2026-11-24", "2026-11-25", "2026-11-26", "2026-11-27", "2026-11-28"] },
+    ].sort((a, b) => compareDatedBenefitPriority(a.dates, b.dates, today));
+    expect(sorted.map((x) => x.id)).toEqual(["active", "sooner", "later", "undated"]);
   });
 });

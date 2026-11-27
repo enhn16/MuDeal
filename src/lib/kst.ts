@@ -342,3 +342,126 @@ export function normalizeEventDates(
 
   return Array.from(normalized).sort();
 }
+
+/** Format an ISO expiration timestamp in KST as "~MM.DD(요일)", e.g. "~11.30(월)". */
+export function formatBookingDeadline(expiresAt: string | null | undefined): string | null {
+  if (!expiresAt) return null;
+  const ms = Date.parse(expiresAt);
+  if (Number.isNaN(ms)) return null;
+  return `~${formatEventDateWithDow(formatKstDate(new Date(ms)))}`;
+}
+
+/** True when a deal is currently applicable (not future-only, not expired, and applicable dates not completely past). */
+export function isDealActiveNow(
+  deal: { opensAt?: string | null; expiresAt?: string | null; eventDates?: string[] },
+  now = new Date(),
+): boolean {
+  if (deal.opensAt) {
+    const openMs = Date.parse(deal.opensAt);
+    if (!Number.isNaN(openMs) && openMs > now.getTime()) return false;
+  }
+  if (isExpired(deal.expiresAt, now)) return false;
+  if (deal.eventDates && deal.eventDates.length > 0) {
+    const todayKst = formatKstDate(now);
+    const latest = deal.eventDates[deal.eventDates.length - 1];
+    if (latest < todayKst) return false;
+  }
+  return true;
+}
+
+/**
+ * Compare two dated benefits/events by priority:
+ * 0: currently active today (start <= today <= end) -> ending soonest first
+ * 1: upcoming (start > today) -> earliest start date first
+ * 2: undated / ongoing
+ * 3: already ended (end < today) -> most recent first
+ */
+export function compareDatedBenefitPriority(
+  aDates: string[],
+  bDates: string[],
+  todayKst: string,
+): number {
+  const rank = (dates: string[]): { tier: number; primary: string; secondary: string } => {
+    if (dates.length === 0) return { tier: 2, primary: "9999-12-31", secondary: "9999-12-31" };
+    const first = dates[0];
+    const last = dates[dates.length - 1];
+    if (first <= todayKst && last >= todayKst) {
+      return { tier: 0, primary: last, secondary: first };
+    }
+    if (first > todayKst) {
+      return { tier: 1, primary: first, secondary: last };
+    }
+    return { tier: 3, primary: last, secondary: first };
+  };
+
+  const ra = rank(aDates);
+  const rb = rank(bDates);
+  if (ra.tier !== rb.tier) return ra.tier - rb.tier;
+  if (ra.tier === 3) return rb.primary.localeCompare(ra.primary);
+  return ra.primary.localeCompare(rb.primary) || ra.secondary.localeCompare(rb.secondary);
+}
+
+/**
+ * Extract booking deadline (`bookingExpiresAt`) and applicable performance dates (`applicableDates`)
+ * from Korean discount labels like:
+ * - "조기예매(~12/1까지 예매시)20%"
+ * - "크리스마스 얼리버드(~12/17)"
+ * - "연말 얼리버드 할인 (12월 24일~31일 전 회차, 11월 11일부터 12월 23일까지 예매 시 적용)"
+ */
+export function extractDiscountDatesFromLabel(
+  label: string | null | undefined,
+  opts: { showStartDate?: string | null; showEndDate?: string | null; now?: Date } = {},
+): { bookingExpiresAt: string | null; applicableDates: string[] } {
+  if (!label) return { bookingExpiresAt: null, applicableDates: [] };
+  const now = opts.now ?? new Date();
+  const refYear = Number(formatKstDate(now).slice(0, 4));
+  // Strip age/birth/year-only noise like "1959년이전출생", "2027수험표", "36개월~만18세", "1인2매"
+  const cleaned = label
+    .replace(/\d{4}\s*년\s*이전\s*출생/g, " ")
+    .replace(/\d{4}\s*수험표/g, " ")
+    .replace(/\d+\s*개월/g, " ")
+    .replace(/만\s*\d+\s*세/g, " ")
+    .replace(/\d+\s*인\s*\d+\s*매/g, " ");
+
+  let bookingExpiresAt: string | null = null;
+  let remainingForPerf = cleaned;
+
+  // 1. Booking deadline clauses: "(~12/1까지 예매시)", "(~12/17)", "11월 11일부터 12월 23일까지 예매 시"
+  const bookingClausePatterns = [
+    /(?:(?:20\d{2}\s*년\s*)?\d{1,2}\s*월\s*\d{1,2}\s*일\s*부터\s*|(?:20\d{2}[./-])?\d{1,2}[./-]\d{1,2}\s*[~～]\s*|~|～)[^,()]{0,28}?(?:까지\s*예매[^,()]*|까지(?=\s*[),]|$))/g,
+    /(?:~|～)\s*(?:20\d{2}[./-])?\d{1,2}[./-]\d{1,2}(?:\s*\([월화수목금토일]\))?(?:\s*까지)?/g,
+    /(?:~|～)\s*(?:20\d{2}\s*년\s*)?\d{1,2}\s*월\s*\d{1,2}\s*일(?:\s*까지)?/g,
+  ];
+
+  const bookingDatesFound: string[] = [];
+  for (const re of bookingClausePatterns) {
+    for (const m of cleaned.matchAll(re)) {
+      const snippet = m[0];
+      // Skip if this snippet explicitly says 회차/공연/관람 (that's performance period, not booking deadline)
+      if (/회차|공연|관람/.test(snippet) && !/예매/.test(snippet)) continue;
+      const dates = normalizeEventDates(extractDatesFromKoreanText(snippet, refYear), {
+        showStartDate: opts.showStartDate,
+        showEndDate: opts.showEndDate,
+        now,
+      });
+      if (dates.length > 0) {
+        bookingDatesFound.push(...dates);
+        remainingForPerf = remainingForPerf.replace(snippet, " ");
+      }
+    }
+  }
+
+  if (bookingDatesFound.length > 0) {
+    const latestBooking = bookingDatesFound.sort().at(-1)!;
+    bookingExpiresAt = new Date(`${latestBooking}T23:59:59+09:00`).toISOString();
+  }
+
+  // 2. Applicable performance dates from remaining text (only explicit date/range mentions)
+  const perfDates = normalizeEventDates(extractDatesFromKoreanText(remainingForPerf, refYear), {
+    showStartDate: opts.showStartDate,
+    showEndDate: opts.showEndDate,
+    now,
+  });
+
+  return { bookingExpiresAt, applicableDates: perfDates };
+}

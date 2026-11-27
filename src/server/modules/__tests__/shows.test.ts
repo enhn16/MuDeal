@@ -234,4 +234,61 @@ describe("4-axis show search filter", () => {
     expect(militaryCards[0].lowestPrice).toBe(52800);
     expect(militaryCards[0].isUnconditional).toBe(false);
   });
+
+  it("picks currently active biggest unconditional discount and prioritizes active/earliest benefit dates", () => {
+    const richDataset = [
+      {
+        show: makeShow({ id: 40, title: "뮤지컬 <여신님이 보고 계셔>", startDate: "2026-11-24", endDate: "2027-03-01" }),
+        deals: [
+          makeDeal({
+            id: 401,
+            showId: 40,
+            basePrice: 88000,
+            salePrice: 61600,
+            discountRate: 30,
+            isUnconditional: 1,
+            conditionSummary: "오프닝 위크 할인 30%",
+            expiresAt: "2026-12-10T14:59:59.000Z",
+          }),
+          makeDeal({
+            id: 402,
+            showId: 40,
+            basePrice: 88000,
+            salePrice: 44000,
+            discountRate: 50,
+            isUnconditional: 1,
+            conditionSummary: "타임세일 50%",
+            eventDatesJson: '["2026-11-25","2026-11-26","2026-11-27"]',
+            expiresAt: "2026-11-27T14:59:59.000Z",
+          }),
+          makeDeal({
+            id: 403,
+            showId: 40,
+            dealType: "PERK_GOODS",
+            salePrice: null,
+            discountRate: null,
+            perkSummary: "12월 중순 특전",
+            eventDatesJson: '["2026-12-15"]',
+          }),
+          makeDeal({
+            id: 404,
+            showId: 40,
+            dealType: "PERK_GOODS",
+            salePrice: null,
+            discountRate: null,
+            perkSummary: "현재 진행 중 탁상달력 특전",
+            eventDatesJson: '["2026-11-24","2026-11-25","2026-11-26"]',
+          }),
+        ],
+        actorNames: [],
+      },
+    ];
+
+    const [card] = filterShowsWithDeals(richDataset, {}, now); // now = 2026-11-25
+    expect(card.maxDiscountRate).toBe(50);
+    expect(card.lowestPrice).toBe(44000);
+    expect(card.discountDates).toEqual(["2026-11-25", "2026-11-26", "2026-11-27"]);
+    expect(card.perkHighlight).toBe("현재 진행 중 탁상달력 특전");
+    expect(card.perkDates).toEqual(["2026-11-24", "2026-11-25", "2026-11-26"]);
+  });
 });

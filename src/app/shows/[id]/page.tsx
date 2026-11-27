@@ -172,12 +172,7 @@ export default async function ShowDetailPage({ params }: { params: ShowRoutePara
                     <span className="text-xs text-muted">{ev.channelName}</span>
                   </div>
                   {dateLabel && (
-                    <p className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary tabular-nums">
-                      <span className="material-symbols-outlined text-[15px] leading-none" aria-hidden="true">
-                        calendar_month
-                      </span>
-                      <span>{dateLabel}</span>
-                    </p>
+                    <p className="text-xs font-semibold text-primary tabular-nums">{dateLabel}</p>
                   )}
                   <h3 className="text-[15px] font-semibold text-on-surface">
                     {ev.conditionSummary ?? DEAL_TYPE_LABELS[ev.dealType]}

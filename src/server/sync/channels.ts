@@ -12,6 +12,7 @@ import {
   type SeatGrade,
   type SubRegion,
 } from "@/db/schema";
+import { expandDateRange, extractDiscountDatesFromLabel, normalizeEventDates } from "@/lib/kst";
 import { calcDiscountRate } from "@/lib/pricing";
 import { parseSafeExternalUrl } from "@/lib/url";
 import { recomputeShowPriceCache } from "@/server/modules/reports";
@@ -67,6 +68,7 @@ export interface RawChannelDraft {
   conditionTags?: ConditionTag[];
   conditionSummary?: string | null;
   opensAt?: string | null;
+  eventDates?: string[] | null;
   externalUrl: string;
   expiresAt?: string | null;
   posterUrl?: string | null;
@@ -503,7 +505,15 @@ export async function runChannelAdapter(
 
       if (meaningful) {
         const [existing] = await db
-          .select({ id: deals.id, status: deals.status, showId: deals.showId, adminLocked: deals.adminLocked })
+          .select({
+            id: deals.id,
+            status: deals.status,
+            showId: deals.showId,
+            adminLocked: deals.adminLocked,
+            expiresAt: deals.expiresAt,
+            eventDatesJson: deals.eventDatesJson,
+            opensAt: deals.opensAt,
+          })
           .from(deals)
           .where(eq(deals.externalKey, item.externalKey))
           .limit(1);
@@ -511,6 +521,7 @@ export async function runChannelAdapter(
         // BP-SYNC-002-3: never overwrite admin_locked=1 deals
         if (existing?.adminLocked !== 1) {
           const tagsJson = item.conditionTags?.length ? JSON.stringify(item.conditionTags) : null;
+          const itemEventDatesJson = item.eventDates?.length ? JSON.stringify(item.eventDates) : null;
           if (!existing) {
             await db.insert(deals).values({
               showId: matchedShowId,
@@ -524,6 +535,7 @@ export async function runChannelAdapter(
               conditionTagsJson: tagsJson,
               conditionSummary: item.conditionSummary ?? null,
               opensAt: item.opensAt ?? null,
+              eventDatesJson: itemEventDatesJson,
               externalUrl: safeUrl,
               externalKey: item.externalKey,
               expiresAt: item.expiresAt ?? null,
@@ -552,7 +564,9 @@ export async function runChannelAdapter(
                 isUnconditional: item.isUnconditional === false ? 0 : 1,
                 conditionTagsJson: tagsJson,
                 conditionSummary: item.conditionSummary ?? null,
-                expiresAt: item.expiresAt ?? null,
+                opensAt: item.opensAt ?? existing.opensAt,
+                eventDatesJson: itemEventDatesJson ?? existing.eventDatesJson,
+                expiresAt: item.expiresAt ?? existing.expiresAt,
                 status: nextStatus,
                 lastVerifiedAt: nowIso,
                 updatedAt: nowIso,
@@ -853,6 +867,7 @@ export interface NolParsedPriceRow {
   priceGradeName: string;
   basePrice: number | null;
   salePrice: number;
+  discountStartDate: string | null;
   discountEndDate: string | null;
 }
 
@@ -862,6 +877,7 @@ export interface NolProductDetailParsed {
   venueName: string | null;
   startDate: string | null;
   endDate: string | null;
+  bookingEndTime: string | null;
   posterUrl: string | null;
   lotteryApplyStart: string | null;
   lotteryApplyEnd: string | null;
@@ -882,6 +898,7 @@ export function parseNolProductDetailHtml(html: string, goodsCode: string): NolP
   let venueName: string | null = null;
   let startDate: string | null = null;
   let endDate: string | null = null;
+  let bookingEndTime: string | null = null;
   let posterUrl: string | null = null;
   let lotteryApplyStart: string | null = null;
   let lotteryApplyEnd: string | null = null;
@@ -899,9 +916,11 @@ export function parseNolProductDetailHtml(html: string, goodsCode: string): NolP
             placeName?: string;
             playStartDate?: string;
             playEndDate?: string;
+            bookingEndTime?: string;
             posterImageUrl?: string;
             detail?: {
               contentInfo?: string;
+              bookingEndTime?: string | null;
               lotteryApplyStartDateTime?: string | null;
               lotteryApplyEndDateTime?: string | null;
               lotteryAnnounceDateTime?: string | null;
@@ -914,6 +933,7 @@ export function parseNolProductDetailHtml(html: string, goodsCode: string): NolP
           venueName = gd.placeName?.trim() || null;
           startDate = gd.playStartDate?.trim() || null;
           endDate = gd.playEndDate?.trim() || null;
+          bookingEndTime = kstDateTimeToIso(gd.bookingEndTime ?? gd.detail?.bookingEndTime);
           posterUrl = gd.posterImageUrl?.replace(/^http:\/\//, "https://") || null;
           lotteryApplyStart = kstDateTimeToIso(gd.detail?.lotteryApplyStartDateTime);
           lotteryApplyEnd = kstDateTimeToIso(gd.detail?.lotteryApplyEndDateTime);
@@ -946,6 +966,9 @@ export function parseNolProductDetailHtml(html: string, goodsCode: string): NolP
               salesPrice?: number;
               regularPrice?: number;
               priceType?: string;
+              priceStartDate?: string;
+              priceEndDate?: string;
+              discountStartDate?: string;
               discountEndDate?: string;
             }>;
           };
@@ -971,7 +994,8 @@ export function parseNolProductDetailHtml(html: string, goodsCode: string): NolP
             priceGradeName: label,
             basePrice,
             salePrice,
-            discountEndDate: kstDateTimeToIso(row.discountEndDate),
+            discountStartDate: kstDateTimeToIso(row.priceStartDate || row.discountStartDate),
+            discountEndDate: kstDateTimeToIso(row.priceEndDate || row.discountEndDate),
           });
         }
       } catch {
@@ -1023,6 +1047,7 @@ export function parseNolProductDetailHtml(html: string, goodsCode: string): NolP
     venueName,
     startDate,
     endDate,
+    bookingEndTime,
     posterUrl,
     lotteryApplyStart,
     lotteryApplyEnd,
@@ -1146,9 +1171,18 @@ export const nolAdapter: ChannelSyncAdapter = {
 
         // 2. Every non-statutory discount row from prices.all
         const extraHints = target.promoKind === "SPECIAL_DAY" ? [target.promoAlt ?? "슈가DAY"] : [];
+        const isStandalonePromoDates =
+          (target.promoKind === "SPECIAL_DAY" || (parsed.startDate && parsed.startDate === parsed.endDate)) &&
+          parsed.startDate
+            ? expandDateRange(parsed.startDate, parsed.endDate ?? parsed.startDate)
+            : [];
         for (const row of parsed.discounts) {
           const classified = classifyDiscountLabel(row.priceGradeName, extraHints);
           if (classified.isStatutory) continue;
+          const labelDates = extractDiscountDatesFromLabel(row.priceGradeName, {
+            showStartDate: parsed.startDate,
+            showEndDate: parsed.endDate,
+          });
           // For special-day standalone goods (e.g. 슈가DAY), if basic row wasn't present, compute from label percent if possible
           let basePrice = row.basePrice;
           if (!basePrice) {
@@ -1157,6 +1191,12 @@ export const nolAdapter: ChannelSyncAdapter = {
               basePrice = Math.round((row.salePrice / (1 - Number(pct) / 100)) / 100) * 100;
             }
           }
+          const applicableDates =
+            labelDates.applicableDates.length > 0 ? labelDates.applicableDates : isStandalonePromoDates;
+          const expiresAt =
+            row.discountEndDate ??
+            labelDates.bookingExpiresAt ??
+            (target.promoKind === "SPECIAL_DAY" ? parsed.bookingEndTime : null);
           drafts.push({
             externalKey: `nol-${target.goodsCode}-${row.seatGrade}-${row.priceGrade}`,
             channelName: "NOL티켓",
@@ -1173,7 +1213,9 @@ export const nolAdapter: ChannelSyncAdapter = {
             isUnconditional: classified.isUnconditional,
             conditionTags: classified.conditionTags,
             conditionSummary: classified.conditionSummary,
-            expiresAt: row.discountEndDate,
+            opensAt: row.discountStartDate,
+            eventDates: applicableDates.length > 0 ? applicableDates : null,
+            expiresAt,
             externalUrl: productUrl,
             posterUrl: parsed.posterUrl,
             synopsisImageUrl: parsed.synopsisImageUrl,
@@ -1458,6 +1500,10 @@ export const yes24Adapter: ChannelSyncAdapter = {
           const row = rows[idx];
           const classified = classifyDiscountLabel(row.label);
           if (classified.isStatutory) continue;
+          const labelDates = extractDiscountDatesFromLabel(row.label, {
+            showStartDate: target.startDate,
+            showEndDate: target.endDate,
+          });
 
           out.push({
             externalKey: `yes24-${target.perfId}-${row.seatGrade}-${idx}`,
@@ -1474,6 +1520,8 @@ export const yes24Adapter: ChannelSyncAdapter = {
             isUnconditional: classified.isUnconditional,
             conditionTags: classified.conditionTags,
             conditionSummary: classified.conditionSummary,
+            eventDates: labelDates.applicableDates.length > 0 ? labelDates.applicableDates : null,
+            expiresAt: labelDates.bookingExpiresAt,
             externalUrl: detailUrl,
             posterUrl: target.posterUrl,
             castCredits: first ? castCredits : undefined,
@@ -1510,6 +1558,8 @@ export const yes24Adapter: ChannelSyncAdapter = {
                   ? "SPECIAL_DAY"
                   : null;
           if (!dealType) continue;
+          const noticeDates = normalizeEventDates([], { fallbackText: title });
+          const latestNotice = noticeDates.at(-1) ?? null;
           out.push({
             externalKey: `yes24-notice-${id}`,
             channelName: "YES24티켓",
@@ -1517,6 +1567,8 @@ export const yes24Adapter: ChannelSyncAdapter = {
             dealType,
             isUnconditional: true,
             conditionSummary: title,
+            eventDates: noticeDates.length > 0 ? noticeDates : null,
+            expiresAt: latestNotice ? new Date(`${latestNotice}T23:59:59+09:00`).toISOString() : null,
             externalUrl: `https://ticket.yes24.com/New/Notice/NoticeMain.aspx?id=${id}`,
           });
         }

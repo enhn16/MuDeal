@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { formatEventDates } from "@/lib/kst";
+import { formatBookingDeadline, formatEventDates } from "@/lib/kst";
 import { DEAL_TYPE_LABELS, SUB_REGION_SHORT, dealBadgeClass } from "@/lib/labels";
 import { formatKrw } from "@/lib/pricing";
 import type { HomeCategory, ShowCardItem } from "@/server/modules/shows";
@@ -41,6 +41,16 @@ export function ShowCard({
       : show.primaryDealType === "TIMESALE" && show.isUnconditional
         ? "무조건 할인"
         : DEAL_TYPE_LABELS[show.primaryDealType];
+
+  const discountApplicableLabel =
+    !isPerkView && !isEventView ? formatEventDates(show.discountDates, "compact") : null;
+  const discountBookingLabel =
+    !isPerkView && !isEventView ? formatBookingDeadline(show.discountExpiresAt) : null;
+  const discountDateLine = discountApplicableLabel
+    ? `관람 ${discountApplicableLabel}`
+    : discountBookingLabel
+      ? `예매 ${discountBookingLabel}`
+      : null;
 
   const perkDateLabel = isPerkView ? formatEventDates(show.perkDates, "compact") : null;
   const eventDateLabel =
@@ -89,11 +99,8 @@ export function ShowCard({
               {show.perkHighlight}
             </p>
             {perkDateLabel && (
-              <p className="inline-flex items-center gap-1 truncate text-xs font-semibold text-primary tabular-nums">
-                <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden="true">
-                  calendar_month
-                </span>
-                <span className="truncate">{perkDateLabel}</span>
+              <p className="truncate text-xs font-semibold text-primary tabular-nums">
+                {perkDateLabel}
               </p>
             )}
           </div>
@@ -103,40 +110,51 @@ export function ShowCard({
               {show.eventHighlight.summary}
             </p>
             {eventDateLabel && (
-              <p className="inline-flex items-center gap-1 truncate text-xs font-semibold text-primary tabular-nums">
-                <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden="true">
-                  calendar_month
-                </span>
-                <span className="truncate">{eventDateLabel}</span>
+              <p className="truncate text-xs font-semibold text-primary tabular-nums">
+                {eventDateLabel}
               </p>
             )}
           </div>
         ) : (
-          <div className="flex flex-wrap items-baseline gap-1.5 pt-0.5 tabular-nums">
-            {show.maxDiscountRate !== null && (
-              <span className="text-[16px] font-bold text-secondary">{show.maxDiscountRate}%</span>
-            )}
-            {show.lowestPrice !== null ? (
-              <span className="text-[16px] font-bold text-on-surface">
-                {formatKrw(show.lowestPrice)}~
-              </span>
-            ) : show.maxDiscountRate !== null ? (
-              <span className="text-sm font-semibold text-on-surface">특별 할인</span>
-            ) : (
-              <span className="text-sm font-semibold text-primary">특전 · 이벤트 진행 중</span>
-            )}
-            {show.basePrice !== null && show.lowestPrice !== null && show.basePrice > show.lowestPrice && (
-              <span className="text-xs text-hint line-through">{formatKrw(show.basePrice)}</span>
+          <div className="flex flex-col gap-0.5 pt-0.5 tabular-nums">
+            <div className="flex flex-wrap items-baseline gap-1.5">
+              {show.maxDiscountRate !== null && (
+                <span className="text-[16px] font-bold text-secondary">{show.maxDiscountRate}%</span>
+              )}
+              {show.lowestPrice !== null ? (
+                <span className="text-[16px] font-bold text-on-surface">
+                  {formatKrw(show.lowestPrice)}~
+                </span>
+              ) : show.maxDiscountRate !== null ? (
+                <span className="text-sm font-semibold text-on-surface">특별 할인</span>
+              ) : (
+                <span className="text-sm font-semibold text-primary">특전 · 이벤트 진행 중</span>
+              )}
+              {show.basePrice !== null && show.lowestPrice !== null && show.basePrice > show.lowestPrice && (
+                <span className="text-xs text-hint line-through">{formatKrw(show.basePrice)}</span>
+              )}
+            </div>
+            {discountDateLine && (
+              <p className="truncate text-xs font-medium text-primary tabular-nums">
+                {discountDateLine}
+              </p>
             )}
           </div>
         )}
 
         <div className="mt-auto flex items-center justify-between gap-2 border-t border-outline pt-2">
           <span className="truncate text-[11px] text-muted tabular-nums">{footerMeta}</span>
-          {show.dDay !== null && show.dDay >= 0 && (
+          {!isPerkView && !isEventView && discountApplicableLabel && discountBookingLabel ? (
             <span className="shrink-0 text-xs font-semibold text-primary tabular-nums">
-              {show.dDay === 0 ? "오늘 마감" : `D-${show.dDay}`}
+              예매 {discountBookingLabel}
             </span>
+          ) : (
+            show.dDay !== null &&
+            show.dDay >= 0 && (
+              <span className="shrink-0 text-xs font-semibold text-primary tabular-nums">
+                {show.dDay === 0 ? "오늘 마감" : `D-${show.dDay}`}
+              </span>
+            )
           )}
         </div>
       </div>
