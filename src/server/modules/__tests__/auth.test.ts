@@ -3,6 +3,7 @@ import { signJwt, verifyJwt } from "@/lib/jwt";
 import { AppError } from "@/lib/errors";
 import {
   ACCESS_COOKIE,
+  canUseLocalDevAuth,
   exchangeOAuthProfile,
   getJwtSecret,
   isAdminKakaoId,
@@ -47,11 +48,27 @@ describe("JWT Web Crypto helper", () => {
 });
 
 describe("Auth & RBAC guards", () => {
-  it("sanitizes redirect URLs against open redirects", () => {
+  it("sanitizes redirect URLs against open redirects and control characters (C-01)", () => {
     expect(sanitizeRedirectUrl("/shows/1?tab=vip")).toBe("/shows/1?tab=vip");
+    expect(sanitizeRedirectUrl("/shows/1?tab=vip#deals")).toBe("/shows/1?tab=vip#deals");
     expect(sanitizeRedirectUrl("https://evil.com")).toBe("/");
     expect(sanitizeRedirectUrl("//evil.com/phish")).toBe("/");
+    expect(sanitizeRedirectUrl("///evil.com/phish")).toBe("/");
+    expect(sanitizeRedirectUrl("/\\evil.com")).toBe("/");
     expect(sanitizeRedirectUrl("javascript:alert(1)")).toBe("/");
+    expect(sanitizeRedirectUrl("/shows/1\r\nSet-Cookie: a=b")).toBe("/");
+    expect(sanitizeRedirectUrl("/\t/evil.com")).toBe("/");
+    expect(sanitizeRedirectUrl("\n/shows/1")).toBe("/");
+    expect(sanitizeRedirectUrl("/shows/1\u0000")).toBe("/");
+    expect(sanitizeRedirectUrl("/shows/1\u007F")).toBe("/");
+  });
+
+  it("gates local dev auth behind explicit ALLOW_LOCAL_DEV_AUTH=true and localhost (C-06)", () => {
+    expect(canUseLocalDevAuth({}, true)).toBe(false);
+    expect(canUseLocalDevAuth({ ALLOW_LOCAL_DEV_AUTH: "false" }, true)).toBe(false);
+    expect(canUseLocalDevAuth({ ALLOW_LOCAL_DEV_AUTH: "true" }, false)).toBe(false);
+    expect(canUseLocalDevAuth({ ALLOW_LOCAL_DEV_AUTH: "true" }, true)).toBe(true);
+    expect(canUseLocalDevAuth(undefined, true)).toBe(false);
   });
 
   it("matches ADMIN_OAUTH_EMAILS and ADMIN_KAKAO_IDS", () => {

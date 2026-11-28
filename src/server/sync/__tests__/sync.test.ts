@@ -1,18 +1,30 @@
 import { describe, expect, it, vi } from "vitest";
+
+vi.mock("cloudflare:workers", () => ({ env: {} }));
+vi.mock("vinext/server/app-router-entry", () => ({
+  default: {
+    fetch: vi.fn(async () => new Response("ok", { status: 200 })),
+  },
+}));
+
 import {
   classifySubRegion,
+  fetchKopisWithTimeout,
   normalizeTitle,
   parseBasePricesText,
   parseCastText,
+  parseChannelLinks,
   parseKopisRelates,
   parseKopisXmlDetail,
   parseKopisXmlList,
+  redactSecrets,
   syncKopisShows,
 } from "@/server/sync/kopis";
 import {
   AUTO_PUBLISH_CONFIDENCE,
   classifyYes24NoticeTitle,
   DEFAULT_CHANNEL_ADAPTERS,
+  fetchWithTimeout,
   isLTicketNonMusical,
   kstDateTimeToIso,
   matchShowThreeFactor,
@@ -40,6 +52,7 @@ import {
 } from "@/server/sync/benefit-filter";
 import { isKidsMusical } from "@/server/sync/kids-filter";
 import {
+  createGeminiSynopsisExtractor,
   createGeminiVisionExtractor,
   OcrExtractSchema,
   parseDailyLimit,
@@ -47,6 +60,7 @@ import {
   safeFetchImage,
 } from "@/server/sync/ocr";
 import { expireEndedDeals } from "@/server/sync/expiry";
+import worker, { checkCsrfOrigin } from "../../../../worker/index";
 
 describe("KOPIS parsers, relates extractor & Daehakro classifier", () => {
   it("parses pcseguidance base prices into seat map", () => {
@@ -708,10 +722,13 @@ describe("Phase 1 P0/P1 regression tests (matching, parsers, filters, OCR safety
 
   it("enforces OCR SSRF/redirect/size/content-type defense, dailyLimit safety, and Gemini model fallback", async () => {
     expect(parseDailyLimit(undefined)).toBe(100);
+    expect(parseDailyLimit("")).toBe(100);
     expect(parseDailyLimit("not-a-number")).toBe(100);
-    expect(parseDailyLimit(0)).toBe(100);
+    expect(parseDailyLimit(0)).toBe(0);
+    expect(parseDailyLimit("0")).toBe(0);
     expect(parseDailyLimit(-3)).toBe(100);
     expect(parseDailyLimit("40")).toBe(40);
+    expect(parseDailyLimit(999)).toBe(500);
 
     // SSRF & private IP blocking
     const neverCalled = vi.fn();
@@ -1416,5 +1433,606 @@ describe("Phase 1 P0/P1 regression tests (matching, parsers, filters, OCR safety
     expect(throwingExtractor).toHaveBeenCalledTimes(1); // Job #2 was NOT attempted
     expect(jobUpdates.at(-1)).toMatchObject({ ocrStatus: "QUEUED" });
     expect(String(jobUpdates.at(-1)?.errorMessage)).not.toContain("[retry:");
+  });
+
+  it("accurately distinguishes unconditional seasonal/anniversary/earlybird deals from real conditional & statutory deals", () => {
+    // Unconditional: open seasonal, anniversary, earlybird, culture-day promos
+    for (const label of [
+      "가을겨울42 (가을에서 겨울 사이 기온은 내려가고 텐션은 올라간다! R석 42,000원!)",
+      "안녕,가을 할인",
+      "주말 안녕가을 할인",
+      "겨울 나들이 할인 (12월 전 회차)",
+      "연말 얼리버드 할인 (12월 24일~31일 전 회차, 11월 11일부터 12월 23일까지 예매 시 적용)",
+      "얼리버드 할인 - WILD석·R석 20%",
+      "난타 29번째 생일 할인 (10~11월 전 회차)",
+      "난타! 29번째 생일을 축하해!30%",
+      "다같이! 생일축하파티(1인4매)30%",
+      "문화가 있는 날(1인4매)55%",
+      "스페셜 초연 기념 할인(1인4매)50%",
+      "크리스마스&앤드위크(1인6매)40%",
+    ]) {
+      const c = classifyDiscountLabel(label);
+      expect(c.isStatutory, label).toBe(false);
+      expect(c.isUnconditional, label).toBe(true);
+      expect(c.conditionTags, label).toEqual([]);
+    }
+
+    // Conditional: identity, membership, rewatch, local resident, group, personal birthday
+    expect(classifyDiscountLabel("강동구 주민 할인(1인4매)60%")).toMatchObject({
+      isUnconditional: false,
+      conditionTags: ["LOCAL_RESIDENT"],
+    });
+    expect(classifyDiscountLabel("문화 릴레이 티켓(1인2매)50%")).toMatchObject({
+      isUnconditional: false,
+      conditionTags: ["REWATCH"],
+    });
+    expect(classifyDiscountLabel("재관람 카드 40% 할인권(1인1매/증빙지참)")).toMatchObject({
+      isUnconditional: false,
+      conditionTags: ["REWATCH"], // NOT CARD_PARTNER
+    });
+    expect(classifyDiscountLabel("toping 회원 할인(1인2매)30%")).toMatchObject({
+      isUnconditional: false,
+      conditionTags: ["CARD_PARTNER"],
+    });
+    expect(classifyDiscountLabel("H.POINT 회원할인(1인4매)35%")).toMatchObject({
+      isUnconditional: false,
+      conditionTags: ["CARD_PARTNER"],
+    });
+    expect(classifyDiscountLabel("생일 할인(증빙지참)20%")).toMatchObject({
+      isUnconditional: false,
+      conditionTags: ["EVENT_CONDITION"],
+    });
+    expect(classifyDiscountLabel("B_DAY 할인(1인2매)20%")).toMatchObject({
+      isUnconditional: false,
+      conditionTags: ["EVENT_CONDITION"],
+    });
+    expect(classifyDiscountLabel("BRIDAL SHOWER 할인(1인4매)20%")).toMatchObject({
+      isUnconditional: false,
+      conditionTags: ["EVENT_CONDITION"],
+    });
+    expect(classifyDiscountLabel("4인모임 할인(평일)45%")).toMatchObject({
+      isUnconditional: false,
+      conditionTags: ["GROUP_PACKAGE"],
+    });
+    expect(classifyDiscountLabel("스물 - 스물 다섯 할인(1인1매)20%")).toMatchObject({
+      isUnconditional: false,
+      conditionTags: ["YOUTH_STUDENT"],
+    });
+    expect(classifyDiscountLabel("퇴근하고 와일드 할인 - R석 40%")).toMatchObject({
+      isUnconditional: false,
+      conditionTags: ["OFFICE_WORKER"],
+    });
+
+    // Statutory: welfare/veteran/pregnant/POW discounts -> excluded
+    for (const statutory of [
+      "고엽제후유의증환자 할인50%",
+      "의사자 및 의사자유족 할인50%",
+      "의상자 할인50%",
+      "등록포로 및 억류지출신 포로가족 할인50%",
+      "임신부50%",
+      "복지50%",
+      "시니어 할인(만65세이상/본인만)",
+      "실버 청춘 할인(1959년이전출생/본인만)50%",
+      "다둥이50%",
+    ]) {
+      expect(classifyDiscountLabel(statutory).isStatutory, statutory).toBe(true);
+    }
+  });
+});
+
+describe("Security audit P0/P1 regressions (C-05, C-08, C-09, C-10)", () => {
+  it("C-05: checkCsrfOrigin blocks cross-site/origin-mismatch state-changing /api/v1/ requests and disallowed Content-Types", async () => {
+    // 1. Sec-Fetch-Site: cross-site -> 403 FORBIDDEN
+    const crossSiteRes = checkCsrfOrigin(
+      new Request("https://mudeal.example.com/api/v1/bookmarks", {
+        method: "POST",
+        headers: { "Sec-Fetch-Site": "cross-site", "Content-Type": "application/json" },
+      }),
+    );
+    expect(crossSiteRes?.status).toBe(403);
+    expect(await crossSiteRes?.json()).toEqual({
+      error: { code: "FORBIDDEN", message: "허용되지 않은 교차 출처 요청입니다." },
+    });
+
+    // 2. Origin mismatch on PATCH/PUT/DELETE -> 403 FORBIDDEN
+    for (const method of ["POST", "PATCH", "PUT", "DELETE"]) {
+      const badOriginRes = checkCsrfOrigin(
+        new Request("https://mudeal.example.com/api/v1/deals/1", {
+          method,
+          headers: { Origin: "https://evil.example.com", "Content-Type": "application/json" },
+        }),
+      );
+      expect(badOriginRes?.status, method).toBe(403);
+    }
+
+    // 3. Disallowed simple-request Content-Types on non-upload /api/v1/ endpoints -> 415 VALIDATION_ERROR
+    for (const ct of ["text/plain; charset=utf-8", "application/x-www-form-urlencoded", "multipart/form-data; boundary=x"]) {
+      const badCtRes = checkCsrfOrigin(
+        new Request("https://mudeal.example.com/api/v1/reports", {
+          method: "POST",
+          headers: { Origin: "https://mudeal.example.com", "Content-Type": ct },
+        }),
+      );
+      expect(badCtRes?.status, ct).toBe(415);
+      expect(await badCtRes?.json()).toEqual({
+        error: { code: "VALIDATION_ERROR", message: "지원하지 않는 Content-Type입니다." },
+      });
+    }
+
+    // 4. Multipart upload allowed ONLY on /api/v1/uploads/report-evidence when same-origin
+    expect(
+      checkCsrfOrigin(
+        new Request("https://mudeal.example.com/api/v1/uploads/report-evidence", {
+          method: "POST",
+          headers: {
+            Origin: "https://mudeal.example.com",
+            "Sec-Fetch-Site": "same-origin",
+            "Content-Type": "multipart/form-data; boundary=----abc",
+          },
+        }),
+      ),
+    ).toBeNull();
+
+    // Still blocks cross-site even on upload endpoint
+    expect(
+      checkCsrfOrigin(
+        new Request("https://mudeal.example.com/api/v1/uploads/report-evidence", {
+          method: "POST",
+          headers: { "Sec-Fetch-Site": "cross-site", "Content-Type": "multipart/form-data; boundary=----abc" },
+        }),
+      )?.status,
+    ).toBe(403);
+
+    // 5. Safe GET requests and valid same-origin JSON POST pass
+    expect(
+      checkCsrfOrigin(
+        new Request("https://mudeal.example.com/api/v1/shows", {
+          method: "GET",
+          headers: { "Sec-Fetch-Site": "cross-site" },
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      checkCsrfOrigin(
+        new Request("https://mudeal.example.com/api/v1/bookmarks", {
+          method: "POST",
+          headers: { Origin: "https://mudeal.example.com", "Content-Type": "application/json" },
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("C-08: validates channel IDs strictly and enforces manual redirect SSRF defense with 3xx body.cancel", async () => {
+    // 1. parseChannelLinks rejects path traversal / slash / oversized IDs
+    expect(
+      parseChannelLinks(
+        JSON.stringify({
+          nol: "../admin/secret",
+          yes24: "60940/../../etc",
+          lticket: "a".repeat(41),
+        }),
+      ),
+    ).toEqual({});
+    expect(
+      parseChannelLinks(
+        JSON.stringify({
+          nol: "26015729",
+          yes24: "60940",
+          lticket: "142_ok-1",
+        }),
+      ),
+    ).toEqual({ nol: "26015729", yes24: "60940", lticket: "142_ok-1" });
+
+    // 2. parseNolMusicalHtml drops malicious goodsCodes while keeping valid ones
+    const maliciousNolPayload = JSON.stringify(
+      `3b:["$","$L41",null,{"data":{"header":{"title":"지금 할인중"},"items":[{"id":"../evil:1","title":"공격작"},{"id":"26014511/admin:1","title":"슬래시작"},{"id":"26014511:26001247","title":"정상작","prices":[{"originPrice":"88,000원","discountPrice":"61,600원"}]}]}}]`,
+    );
+    const nolItems = parseNolMusicalHtml(`<script>self.__next_f.push([1,${maliciousNolPayload}])</script>`);
+    expect(nolItems.map((i) => i.goodsCode)).toEqual(["26014511"]);
+
+    // 3. fetchWithTimeout (channels.ts) & fetchKopisWithTimeout (kopis.ts): manual redirect + SSRF check + body.cancel
+    const make3xxResponse = (location: string) => {
+      const cancelSpy = vi.fn(async () => undefined);
+      const fakeRes = {
+        status: 302,
+        ok: false,
+        headers: new Headers({ location }),
+        body: { cancel: cancelSpy },
+      } as unknown as Response;
+      return { fakeRes, cancelSpy };
+    };
+
+    const chBad = make3xxResponse("https://169.254.169.254/latest/meta-data");
+    const chBadFetch = vi.fn(async () => chBad.fakeRes) as unknown as typeof fetch;
+    await expect(
+      fetchWithTimeout("https://nol.yanolja.com/ticket/genre/musical", {}, 5000, chBadFetch),
+    ).rejects.toThrow(/unsafe/i);
+    expect(chBad.cancelSpy).toHaveBeenCalledTimes(1);
+
+    const kopisBad = make3xxResponse("https://127.0.0.1/internal");
+    const kopisBadFetch = vi.fn(async () => kopisBad.fakeRes) as unknown as typeof fetch;
+    await expect(
+      fetchKopisWithTimeout(kopisBadFetch, "https://www.kopis.or.kr/openApi/restful/pblprfr", 5000),
+    ).rejects.toThrow(/unsafe/i);
+    expect(kopisBad.cancelSpy).toHaveBeenCalledTimes(1);
+
+    // Too many redirects (>2 hops) blocked
+    const hopSpy = vi.fn(async () => make3xxResponse("https://www.kopis.or.kr/next").fakeRes) as unknown as typeof fetch;
+    await expect(
+      fetchKopisWithTimeout(hopSpy, "https://www.kopis.or.kr/start", 5000),
+    ).rejects.toThrow(/redirect blocked/i);
+    expect(hopSpy).toHaveBeenCalledTimes(3);
+
+    // 4. safeFetchImage cancels 3xx response body on valid redirect hop and on blocked redirect
+    const imgHop = make3xxResponse("https://cdn.example.com/final.png");
+    let imgStep = 0;
+    const imgRedirectFetch = vi.fn(async () => {
+      imgStep += 1;
+      if (imgStep === 1) return imgHop.fakeRes;
+      return new Response(new Uint8Array([1, 2, 3, 4]), {
+        status: 200,
+        headers: { "content-type": "image/png" },
+      });
+    }) as unknown as typeof fetch;
+    const fetched = await safeFetchImage("https://cdn.example.com/start.png", imgRedirectFetch);
+    expect(fetched.mimeType).toBe("image/png");
+    expect(imgHop.cancelSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("C-09: enforces OCR dailyLimit=0 kill-switch, schema string bounds, conservative DRAFT isolation, and worker fail-closed", async () => {
+    // 1. dailyLimit: 0 / "0" immediately skips OCR without touching DB or extractor
+    const untouchedDb = {
+      select: vi.fn(() => {
+        throw new Error("DB should not be queried when dailyLimit is 0");
+      }),
+    } as unknown as Parameters<typeof processPendingOcrJobs>[0];
+    const untouchedExtractor = vi.fn();
+
+    expect(
+      await processPendingOcrJobs(untouchedDb, { dailyLimit: 0, extractor: untouchedExtractor }),
+    ).toEqual({ processed: 0, draftsCreated: 0, skippedByLimit: true, remainingDailyLimit: 0 });
+    expect(
+      await processPendingOcrJobs(untouchedDb, { dailyLimit: "0", extractor: untouchedExtractor }),
+    ).toEqual({ processed: 0, draftsCreated: 0, skippedByLimit: true, remainingDailyLimit: 0 });
+    expect(untouchedExtractor).not.toHaveBeenCalled();
+
+    // 2. OcrExtractSchema enforces .max(64) on array items & expiresAtKst
+    const longStr = "x".repeat(65);
+    expect(() =>
+      OcrExtractSchema.parse({
+        hasRelevantInfo: true,
+        confidence: 0.9,
+        discounts: [{ applicableDates: [longStr] }],
+        events: [],
+      }),
+    ).toThrow();
+    expect(() =>
+      OcrExtractSchema.parse({
+        hasRelevantInfo: true,
+        confidence: 0.9,
+        discounts: [{ conditionTags: [longStr] }],
+        events: [],
+      }),
+    ).toThrow();
+    expect(() =>
+      OcrExtractSchema.parse({
+        hasRelevantInfo: true,
+        confidence: 0.9,
+        discounts: [],
+        events: [{ dealType: "PERK_GOODS", eventDates: [longStr] }],
+      }),
+    ).toThrow();
+    const cappedExp = OcrExtractSchema.parse({
+      hasRelevantInfo: true,
+      confidence: 0.9,
+      discounts: [{ expiresAtKst: longStr }],
+      events: [],
+    });
+    expect(cappedExp.discounts[0].expiresAtKst).toBeNull();
+
+    // 3. processPendingOcrJobs isolates: null basePricesJson, empty conditionSummary, LLM/classifier conflicts, and empty-date events
+    const runOcrWith = async (
+      basePricesJson: string | null,
+      extracted: Parameters<typeof OcrExtractSchema.parse>[0],
+    ) => {
+      const inserted: Array<Record<string, unknown>> = [];
+      let selectCall = 0;
+      const mockDb = {
+        select: () => ({
+          from: () => ({
+            where: () => {
+              selectCall += 1;
+              if (selectCall === 1) return Promise.resolve([]);
+              if (selectCall === 2) return Promise.resolve([{ count: 0 }]);
+              if (selectCall === 3) {
+                return {
+                  orderBy: () => ({
+                    limit: async () => [
+                      {
+                        id: 90,
+                        showId: 5,
+                        sourceChannel: "NOL티켓",
+                        sourcePageUrl: "https://nol.yanolja.com/ticket/products/26014511",
+                        imageUrl: "https://ticketimage.interpark.com/c09.png",
+                        ocrStatus: "QUEUED",
+                        errorMessage: null,
+                      },
+                    ],
+                  }),
+                };
+              }
+              if (selectCall === 4) return { limit: async () => [] };
+              if (selectCall === 5) {
+                return {
+                  limit: async () => [
+                    {
+                      title: "뮤지컬 테스트",
+                      startDate: "2026-11-01",
+                      endDate: "2027-01-31",
+                      status: "ONGOING",
+                      basePricesJson,
+                    },
+                  ],
+                };
+              }
+              if (selectCall === 6) return Promise.resolve([]);
+              return { limit: async () => [] };
+            },
+          }),
+        }),
+        insert: () => ({
+          values: (val: Record<string, unknown>) => {
+            inserted.push(val);
+            return Promise.resolve();
+          },
+        }),
+        update: () => ({
+          set: () => ({
+            where: () => ({
+              returning: async () => [{ id: 90 }],
+            }),
+          }),
+        }),
+      } as unknown as Parameters<typeof processPendingOcrJobs>[0];
+
+      const imgFetch = vi.fn(async () =>
+        new Response(new Uint8Array([1, 2, 3, 4]), { status: 200, headers: { "content-type": "image/png" } }),
+      ) as unknown as typeof fetch;
+
+      await processPendingOcrJobs(
+        mockDb,
+        {
+          dailyLimit: 50,
+          fetchFn: imgFetch,
+          extractor: async () => OcrExtractSchema.parse(extracted),
+        },
+        new Date("2026-11-27T03:00:00.000Z"),
+      );
+      return inserted;
+    };
+
+    // 3a. basePricesJson === null -> discount MUST stay DRAFT
+    const noBaseDeals = await runOcrWith(null, {
+      hasRelevantInfo: true,
+      confidence: 0.95,
+      discounts: [
+        {
+          seatGrade: "R",
+          salePrice: 70000,
+          discountRate: 30,
+          isUnconditional: true,
+          conditionTags: [],
+          conditionSummary: "조기예매 할인",
+          expiresAtKst: null,
+          applicableDates: [],
+        },
+      ],
+      events: [],
+    });
+    expect(noBaseDeals[0]).toMatchObject({ status: "DRAFT" });
+
+    // 3b. empty conditionSummary / LLM-classifier conflict / empty-date event -> DRAFT & isUnconditional=0
+    const hardenedDeals = await runOcrWith('{"R":100000}', {
+      hasRelevantInfo: true,
+      confidence: 0.95,
+      discounts: [
+        // Empty conditionSummary must NOT become unconditional=1 or ACTIVE
+        {
+          seatGrade: "R",
+          salePrice: 70000,
+          discountRate: 30,
+          isUnconditional: true,
+          conditionTags: [],
+          conditionSummary: "   ",
+          expiresAtKst: null,
+          applicableDates: [],
+        },
+        // LLM says isUnconditional=false on unrecognized label -> keep isUnconditional=0 & isolate DRAFT
+        {
+          seatGrade: "R",
+          salePrice: 70000,
+          discountRate: 30,
+          isUnconditional: false,
+          conditionTags: [],
+          conditionSummary: "스페셜 우대 할인",
+          expiresAtKst: null,
+          applicableDates: [],
+        },
+        // LLM provides conditionTags while classifier sees unconditional -> keep isUnconditional=0 & isolate DRAFT
+        {
+          seatGrade: "R",
+          salePrice: 70000,
+          discountRate: 30,
+          isUnconditional: true,
+          conditionTags: ["YOUTH_STUDENT"],
+          conditionSummary: "가을 할인",
+          expiresAtKst: null,
+          applicableDates: [],
+        },
+      ],
+      events: [
+        // Empty eventDates and no date in text -> DRAFT
+        {
+          dealType: "PERK_GOODS",
+          eventDates: [],
+          perkSummary: "전 관객 포토카드 증정",
+          conditionSummary: null,
+        },
+        // Valid future eventDates -> ACTIVE
+        {
+          dealType: "SINGALONG",
+          eventDates: ["2026-12-15"],
+          perkSummary: "싱어롱 데이",
+          conditionSummary: null,
+        },
+      ],
+    });
+    expect(hardenedDeals).toHaveLength(5);
+    expect(hardenedDeals[0]).toMatchObject({ externalKey: "ocr:90:disc:0", isUnconditional: 0, status: "DRAFT" });
+    expect(hardenedDeals[1]).toMatchObject({ externalKey: "ocr:90:disc:1", isUnconditional: 0, status: "DRAFT" });
+    expect(hardenedDeals[2]).toMatchObject({ externalKey: "ocr:90:disc:2", isUnconditional: 0, status: "DRAFT" });
+    expect(hardenedDeals[3]).toMatchObject({ externalKey: "ocr:90:ev:0", status: "DRAFT" });
+    expect(hardenedDeals[4]).toMatchObject({ externalKey: "ocr:90:ev:1", status: "ACTIVE" });
+
+    // 4. Worker scheduled Fail-Closed: when processPendingOcrJobs throws, populateMissingSynopses is NOT called
+    let dbPrepareCalls = 0;
+    const throwingD1 = {
+      prepare: vi.fn(() => {
+        dbPrepareCalls += 1;
+        throw new Error("D1 failure with GEMINI_SECRET_XYZ");
+      }),
+    } as unknown as D1Database;
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await worker.scheduled(
+        { cron: "40 */6 * * *" } as ScheduledController,
+        {
+          DB: throwingD1,
+          OCR_DAILY_LIMIT: "100",
+          GEMINI_API_KEY: "GEMINI_SECRET_XYZ",
+        },
+      );
+      // Only processPendingOcrJobs hit DB; populateMissingSynopses was NOT invoked after failure
+      expect(dbPrepareCalls).toBe(1);
+      expect(errSpy).toHaveBeenCalledTimes(1);
+      expect(String(errSpy.mock.calls[0]?.[1])).not.toContain("GEMINI_SECRET_XYZ");
+      expect(String(errSpy.mock.calls[0]?.[1])).toContain("[REDACTED]");
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it("C-10: sends Gemini key via x-goog-api-key header (not URL) and redacts secrets from logs and DB errors", async () => {
+    // 1. redactSecrets unit checks
+    expect(
+      redactSecrets(
+        "Failed https://api.example.com?key=AIza123&service=KOPIS_KEY&api_key=abc&token=tok1&secret=sec1&ok=1",
+      ),
+    ).toBe(
+      "Failed https://api.example.com?key=[REDACTED]&service=[REDACTED]&api_key=[REDACTED]&token=[REDACTED]&secret=[REDACTED]&ok=1",
+    );
+    expect(redactSecrets("raw SUPER+SECRET and enc SUPER%2BSECRET", ["SUPER+SECRET"])).toBe(
+      "raw [REDACTED] and enc [REDACTED]",
+    );
+    expect(redactSecrets("a".repeat(800)).length).toBe(500);
+
+    // 2. Gemini Vision & Synopsis extractors use x-goog-api-key header and never place key in URL
+    const observedCalls: Array<{ url: string; headers: Headers }> = [];
+    const geminiMockFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      observedCalls.push({ url: String(input), headers: new Headers(init?.headers) });
+      const text =
+        observedCalls.length === 1
+          ? JSON.stringify({ hasRelevantInfo: false, confidence: 0.9, discounts: [], events: [] })
+          : JSON.stringify({ synopsis: "공연 줄거리 테스트 문장입니다. 충분히 긴 시놉시스." });
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text }] } }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const vision = createGeminiVisionExtractor("MY_GEMINI_KEY_999", geminiMockFetch);
+    await vision(new Uint8Array([1, 2, 3]).buffer, "image/png");
+    const synopsis = createGeminiSynopsisExtractor("MY_GEMINI_KEY_999", geminiMockFetch);
+    await synopsis([{ bytes: new Uint8Array([1, 2, 3]).buffer, mimeType: "image/png" }], "테스트");
+
+    expect(observedCalls).toHaveLength(2);
+    for (const call of observedCalls) {
+      expect(call.url).not.toContain("key=");
+      expect(call.url).not.toContain("MY_GEMINI_KEY_999");
+      expect(call.headers.get("x-goog-api-key")).toBe("MY_GEMINI_KEY_999");
+    }
+
+    // 3. syncKopisShows redacts KOPIS API key in sync_runs.error_message and returned error
+    const updatedSyncRuns: Array<Record<string, unknown>> = [];
+    const mockKopisDb = {
+      insert: () => ({ values: () => ({ returning: async () => [{ id: 1 }] }) }),
+      update: () => ({
+        set: (val: Record<string, unknown>) => {
+          updatedSyncRuns.push(val);
+          return { where: async () => undefined };
+        },
+      }),
+    } as unknown as Parameters<typeof syncKopisShows>[0];
+
+    const leakingFetch = vi.fn(async (url: string | URL | Request) => {
+      throw new Error(`network fail for ${String(url)}`);
+    }) as unknown as typeof fetch;
+
+    const kopisRes = await syncKopisShows(mockKopisDb, "KOPIS_SECRET_777", new Date("2026-11-27T00:00:00Z"), {
+      fetchFn: leakingFetch,
+    });
+    expect(kopisRes.status).toBe("FAILED");
+    expect(kopisRes.error).not.toContain("KOPIS_SECRET_777");
+    expect(kopisRes.error).toContain("service=[REDACTED]");
+    expect(String(updatedSyncRuns.at(-1)?.errorMessage)).not.toContain("KOPIS_SECRET_777");
+
+    // 4. processPendingOcrJobs redacts secrets in ocr_image_jobs.error_message
+    const ocrJobUpdates: Array<Record<string, unknown>> = [];
+    let ocrSelect = 0;
+    const mockOcrDb = {
+      select: () => ({
+        from: () => ({
+          where: () => {
+            ocrSelect += 1;
+            if (ocrSelect === 1) return Promise.resolve([]);
+            if (ocrSelect === 2) return Promise.resolve([{ count: 0 }]);
+            if (ocrSelect === 3) {
+              return {
+                orderBy: () => ({
+                  limit: async () => [
+                    {
+                      id: 91,
+                      showId: 5,
+                      sourceChannel: "NOL티켓",
+                      sourcePageUrl: "https://nol.yanolja.com/ticket/products/26014511",
+                      imageUrl: "https://ticketimage.interpark.com/err.png",
+                      ocrStatus: "QUEUED",
+                      errorMessage: null,
+                    },
+                  ],
+                }),
+              };
+            }
+            if (ocrSelect === 4) return { limit: async () => [] };
+            return { limit: async () => [] };
+          },
+        }),
+      }),
+      update: () => ({
+        set: (val: Record<string, unknown>) => {
+          ocrJobUpdates.push(val);
+          return { where: () => ({ returning: async () => [{ id: 91 }] }) };
+        },
+      }),
+    } as unknown as Parameters<typeof processPendingOcrJobs>[0];
+
+    await processPendingOcrJobs(mockOcrDb, {
+      dailyLimit: 50,
+      fetchFn: vi.fn(async () =>
+        new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "image/png" } }),
+      ) as unknown as typeof fetch,
+      extractor: async () => {
+        throw new Error("request failed https://generativelanguage.googleapis.com?key=LEAKED_KEY_123");
+      },
+    });
+    expect(String(ocrJobUpdates.at(-1)?.errorMessage)).not.toContain("LEAKED_KEY_123");
+    expect(String(ocrJobUpdates.at(-1)?.errorMessage)).toContain("key=[REDACTED]");
   });
 });

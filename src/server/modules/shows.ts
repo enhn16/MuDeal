@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import type { AppDb } from "@/db/client";
 import {
   actors,
+  chunkArray,
   CONDITION_TAGS,
   DEAL_TYPES,
   deals,
@@ -858,10 +859,8 @@ export async function getActorDetail(db: AppDb, actorId: number, now = new Date(
     .innerJoin(shows, eq(showActors.showId, shows.id))
     .where(eq(showActors.actorId, actorId));
 
-  const showIds = appearances.map((a) => a.show.id);
   const activeDeals: (typeof deals.$inferSelect)[] = [];
-  for (let i = 0; i < showIds.length; i += 50) {
-    const chunk = showIds.slice(i, i + 50);
+  for (const chunk of chunkArray(appearances.map((a) => a.show.id))) {
     const chunkRows = await db
       .select()
       .from(deals)

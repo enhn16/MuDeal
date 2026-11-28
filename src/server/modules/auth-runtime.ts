@@ -6,6 +6,7 @@ import { userNotifications } from "@/db/schema";
 import type { CloudflareEnv } from "@/env";
 import {
   ACCESS_COOKIE,
+  canUseLocalDevAuth,
   getJwtSecret,
   getOptionalAuthUser,
   isLocalhostHost,
@@ -20,12 +21,18 @@ export function getAuthEnv(): CloudflareEnv {
 }
 
 export function getRuntimeJwtSecret(req: Request): string {
-  return getJwtSecret(getAuthEnv(), { allowDevFallback: isLocalhostOrigin(new URL(req.url)) });
+  const cfEnv = getAuthEnv();
+  return getJwtSecret(cfEnv, {
+    allowDevFallback: canUseLocalDevAuth(cfEnv, isLocalhostOrigin(new URL(req.url))),
+  });
 }
 
 export async function getServerJwtSecret(): Promise<string> {
+  const cfEnv = getAuthEnv();
   const h = await headers();
-  return getJwtSecret(getAuthEnv(), { allowDevFallback: isLocalhostHost(h.get("host")) });
+  return getJwtSecret(cfEnv, {
+    allowDevFallback: canUseLocalDevAuth(cfEnv, isLocalhostHost(h.get("host"))),
+  });
 }
 
 export async function requireRuntimeAuth(req: Request): Promise<AuthUser> {

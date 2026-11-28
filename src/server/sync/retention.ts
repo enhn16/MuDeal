@@ -2,6 +2,7 @@ import { and, eq, inArray, isNotNull, lt, ne, or, sql } from "drizzle-orm";
 import type { AppDb } from "@/db/client";
 import {
   auditLogs,
+  chunkArray,
   dealIssues,
   dealReports,
   deals,
@@ -17,7 +18,6 @@ import {
 import { formatKstDate } from "@/lib/kst";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const D1_IN_CHUNK = 50;
 
 export interface RetentionPurgeSummary {
   outboundClicks: number;
@@ -46,9 +46,8 @@ async function deleteByIdsChunked(
   ids: number[],
   deleteChunk: (chunk: number[]) => Promise<unknown>,
 ): Promise<number> {
-  if (ids.length === 0) return 0;
-  for (let i = 0; i < ids.length; i += D1_IN_CHUNK) {
-    await deleteChunk(ids.slice(i, i + D1_IN_CHUNK));
+  for (const chunk of chunkArray(ids)) {
+    await deleteChunk(chunk);
   }
   return ids.length;
 }
@@ -255,49 +254,7 @@ export async function purgeExpiredRetentionData(
     console.error("[retention:audit_logs] failed:", err);
   }
 
-  // 9. deal_reports: rejected reports > 180 days
-  try {
-    const cutoff = daysAgoIso(now, 180);
-    const rows = await db
-      .select({ id: dealReports.id })
-      .from(dealReports)
-      .where(and(eq(dealReports.status, "REJECTED"), lt(dealReports.updatedAt, cutoff)))
-      .limit(limit);
-    summary.rejectedReports = await deleteByIdsChunked(
-      rows.map((r) => r.id),
-      (chunk) => db.delete(dealReports).where(inArray(dealReports.id, chunk)),
-    );
-  } catch (err) {
-    console.error("[retention:deal_reports] failed:", err);
-  }
-
-  // 10. shows: ENDED > 365 days with ZERO bookmark/calendar/report/deal references
-  try {
-    const cutoffDate = daysAgoKstDate(now, 365);
-    const rows = await db
-      .select({ id: shows.id })
-      .from(shows)
-      .where(
-        and(
-          eq(shows.status, "ENDED"),
-          ne(shows.endDate, ""),
-          lt(shows.endDate, cutoffDate),
-          sql`NOT EXISTS (SELECT 1 FROM ${userShowBookmarks} WHERE ${userShowBookmarks.showId} = ${shows.id})`,
-          sql`NOT EXISTS (SELECT 1 FROM ${userCalendarEvents} WHERE ${userCalendarEvents.sourceShowId} = ${shows.id})`,
-          sql`NOT EXISTS (SELECT 1 FROM ${dealReports} WHERE ${dealReports.showId} = ${shows.id})`,
-          sql`NOT EXISTS (SELECT 1 FROM ${deals} WHERE ${deals.showId} = ${shows.id})`,
-        ),
-      )
-      .limit(Math.min(limit, 50));
-    summary.endedShows = await deleteByIdsChunked(
-      rows.map((r) => r.id),
-      (chunk) => db.delete(shows).where(inArray(shows.id, chunk)),
-    );
-  } catch (err) {
-    console.error("[retention:shows] failed:", err);
-  }
-
-  // 11. R2 processed report evidence images older than 30 days (backup to R2 Lifecycle Rule)
+  // 9. R2 processed report evidence images older than 30 days (MUST run BEFORE rejected deal_reports DB deletion so R2 keys are never orphaned)
   if (opts?.evidenceBucket) {
     try {
       const r2Cutoff = daysAgoIso(now, 30);
@@ -329,6 +286,63 @@ export async function purgeExpiredRetentionData(
     } catch (err) {
       console.error("[retention:r2] failed:", err);
     }
+  }
+
+  // 10. deal_reports: rejected reports > 180 days (delete any remaining R2 evidence key first if bucket is bound)
+  try {
+    const cutoff = daysAgoIso(now, 180);
+    const rows = await db
+      .select({ id: dealReports.id, evidenceR2Key: dealReports.evidenceR2Key })
+      .from(dealReports)
+      .where(and(eq(dealReports.status, "REJECTED"), lt(dealReports.updatedAt, cutoff)))
+      .limit(limit);
+
+    const deletableIds: number[] = [];
+    for (const row of rows) {
+      if (opts?.evidenceBucket && row.evidenceR2Key) {
+        try {
+          await opts.evidenceBucket.delete(row.evidenceR2Key);
+          summary.r2ObjectsDeleted += 1;
+        } catch (err) {
+          console.error(`[retention:r2:${row.evidenceR2Key}] failed before report delete:`, err);
+          continue;
+        }
+      }
+      deletableIds.push(row.id);
+    }
+
+    summary.rejectedReports = await deleteByIdsChunked(
+      deletableIds,
+      (chunk) => db.delete(dealReports).where(inArray(dealReports.id, chunk)),
+    );
+  } catch (err) {
+    console.error("[retention:deal_reports] failed:", err);
+  }
+
+  // 11. shows: ENDED > 365 days with ZERO bookmark/calendar/report/deal references
+  try {
+    const cutoffDate = daysAgoKstDate(now, 365);
+    const rows = await db
+      .select({ id: shows.id })
+      .from(shows)
+      .where(
+        and(
+          eq(shows.status, "ENDED"),
+          ne(shows.endDate, ""),
+          lt(shows.endDate, cutoffDate),
+          sql`NOT EXISTS (SELECT 1 FROM ${userShowBookmarks} WHERE ${userShowBookmarks.showId} = ${shows.id})`,
+          sql`NOT EXISTS (SELECT 1 FROM ${userCalendarEvents} WHERE ${userCalendarEvents.sourceShowId} = ${shows.id})`,
+          sql`NOT EXISTS (SELECT 1 FROM ${dealReports} WHERE ${dealReports.showId} = ${shows.id})`,
+          sql`NOT EXISTS (SELECT 1 FROM ${deals} WHERE ${deals.showId} = ${shows.id})`,
+        ),
+      )
+      .limit(Math.min(limit, 50));
+    summary.endedShows = await deleteByIdsChunked(
+      rows.map((r) => r.id),
+      (chunk) => db.delete(shows).where(inArray(shows.id, chunk)),
+    );
+  } catch (err) {
+    console.error("[retention:shows] failed:", err);
   }
 
   return summary;

@@ -4,6 +4,7 @@ import {
   STATE_COOKIE,
   buildOAuthAuthorizeUrl,
   buildSetCookie,
+  canUseLocalDevAuth,
   getJwtSecret,
   isLocalhostOrigin,
   normalizeProvider,
@@ -19,7 +20,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
     const redirectUrl = sanitizeRedirectUrl(url.searchParams.get("redirectUrl"), "/");
     const devAs = url.searchParams.get("as");
     const cfEnv = getAuthEnv();
-    const secret = getJwtSecret(cfEnv, { allowDevFallback: isLocalhostOrigin(url) });
+    const allowDevAuth = canUseLocalDevAuth(cfEnv, isLocalhostOrigin(url));
+    const secret = getJwtSecret(cfEnv, { allowDevFallback: allowDevAuth });
 
     const state = randomTokenHex(16);
     const stateJwt = await signJwt({ state, redirectUrl, provider }, secret, 600);
@@ -37,8 +39,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
       return new Response(null, { status: 302, headers });
     }
 
-    // shortcut: local-only dev OAuth bypass when KAKAO/GOOGLE client IDs are unset; blocked outside localhost
-    if (isLocalhostOrigin(url)) {
+    // shortcut: local-only dev OAuth bypass requires explicit ALLOW_LOCAL_DEV_AUTH=true + localhost
+    if (allowDevAuth) {
       const qs = new URLSearchParams({ code: "dev", state });
       if (devAs) qs.set("as", devAs);
       headers.set("Location", `${callbackUrl}?${qs.toString()}`);

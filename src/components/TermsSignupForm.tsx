@@ -4,6 +4,14 @@ import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+function toSafeInternalPath(url: unknown): string {
+  if (typeof url !== "string") return "/";
+  if (!url.startsWith("/") || url.includes("//") || url.includes("\\") || /[\u0000-\u001F\u007F]/.test(url)) {
+    return "/";
+  }
+  return url;
+}
+
 export function TermsSignupForm({ defaultNickname }: { defaultNickname: string }) {
   const router = useRouter();
   const [nickname, setNickname] = useState(defaultNickname);
@@ -35,7 +43,7 @@ export function TermsSignupForm({ defaultNickname }: { defaultNickname: string }
         setError(json.error?.message ?? "가입을 마치지 못했어요. 다시 시도해 주세요.");
         return;
       }
-      router.push(json.data.redirectUrl);
+      router.push(toSafeInternalPath(json.data.redirectUrl));
       router.refresh();
     } finally {
       setBusy(false);

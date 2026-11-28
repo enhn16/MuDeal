@@ -3,7 +3,7 @@ import { getDb } from "../src/db/client";
 import type { CloudflareEnv } from "../src/env";
 import { lTicketAdapter, nolAdapter, runChannelAdapter, yes24Adapter } from "../src/server/sync/channels";
 import { expireEndedDeals } from "../src/server/sync/expiry";
-import { syncKopisShows } from "../src/server/sync/kopis";
+import { redactSecrets, syncKopisShows } from "../src/server/sync/kopis";
 import {
   createGeminiSynopsisExtractor,
   createGeminiVisionExtractor,
@@ -19,9 +19,67 @@ const SECURITY_HEADERS: ReadonlyArray<[string, string]> = [
   ["X-Frame-Options", "DENY"],
 ];
 
+const STATE_CHANGING_METHODS = new Set(["POST", "PATCH", "PUT", "DELETE"]);
+const DISALLOWED_CSRF_CONTENT_TYPES = [
+  "text/plain",
+  "application/x-www-form-urlencoded",
+  "multipart/form-data",
+];
+
+function jsonErrorResponse(
+  status: number,
+  code: "FORBIDDEN" | "VALIDATION_ERROR",
+  message: string,
+): Response {
+  const headers = new Headers({ "Content-Type": "application/json; charset=utf-8" });
+  for (const [k, v] of SECURITY_HEADERS) {
+    headers.set(k, v);
+  }
+  return new Response(JSON.stringify({ error: { code, message } }), { status, headers });
+}
+
+export function checkCsrfOrigin(request: Request): Response | null {
+  if (!STATE_CHANGING_METHODS.has(request.method.toUpperCase())) return null;
+  const url = new URL(request.url);
+  if (!url.pathname.startsWith("/api/v1/")) return null;
+
+  const secFetchSite = request.headers.get("Sec-Fetch-Site")?.trim().toLowerCase();
+  if (secFetchSite === "cross-site") {
+    return jsonErrorResponse(403, "FORBIDDEN", "허용되지 않은 교차 출처 요청입니다.");
+  }
+
+  const origin = request.headers.get("Origin")?.trim();
+  if (origin && origin !== url.origin) {
+    return jsonErrorResponse(403, "FORBIDDEN", "허용되지 않은 교차 출처 요청입니다.");
+  }
+
+  if (url.pathname !== "/api/v1/uploads/report-evidence") {
+    const contentType = request.headers.get("Content-Type")?.trim().toLowerCase();
+    if (contentType && DISALLOWED_CSRF_CONTENT_TYPES.some((ct) => contentType.startsWith(ct))) {
+      return jsonErrorResponse(415, "VALIDATION_ERROR", "지원하지 않는 Content-Type입니다.");
+    }
+  }
+
+  return null;
+}
+
+function formatCronError(err: unknown, env: CloudflareEnv): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  return redactSecrets(raw, [
+    env.KOPIS_API_KEY,
+    env.GEMINI_API_KEY,
+    env.JWT_SECRET,
+    env.KAKAO_CLIENT_SECRET,
+    env.GOOGLE_CLIENT_SECRET,
+  ]);
+}
+
 export default {
   ...handler,
   async fetch(request: Request, env: CloudflareEnv, ctx: ExecutionContext) {
+    const csrfBlocked = checkCsrfOrigin(request);
+    if (csrfBlocked) return csrfBlocked;
+
     const response = await handler.fetch(
       request,
       env as Parameters<typeof handler.fetch>[1],
@@ -45,7 +103,7 @@ export default {
       try {
         await expireEndedDeals(db);
       } catch (err) {
-        console.error("[cron:expiry] failed:", err);
+        console.error("[cron:expiry] failed:", formatCronError(err, env));
       }
       return;
     }
@@ -55,14 +113,14 @@ export default {
       try {
         await syncKopisShows(db, env.KOPIS_API_KEY);
       } catch (err) {
-        console.error("[cron:kopis] failed:", err);
+        console.error("[cron:kopis] failed:", formatCronError(err, env));
       }
       try {
         await purgeExpiredRetentionData(db, new Date(), {
           evidenceBucket: env.EVIDENCE_BUCKET,
         });
       } catch (err) {
-        console.error("[cron:retention] failed:", err);
+        console.error("[cron:retention] failed:", formatCronError(err, env));
       }
       return;
     }
@@ -73,7 +131,7 @@ export default {
         try {
           await runChannelAdapter(db, adapter);
         } catch (err) {
-          console.error(`[cron:${adapter.sourceName}] failed:`, err);
+          console.error(`[cron:${adapter.sourceName}] failed:`, formatCronError(err, env));
         }
       }
       return;
@@ -84,7 +142,7 @@ export default {
       try {
         await runChannelAdapter(db, yes24Adapter);
       } catch (err) {
-        console.error("[cron:YES24] failed:", err);
+        console.error("[cron:YES24] failed:", formatCronError(err, env));
       }
       return;
     }
@@ -93,7 +151,7 @@ export default {
     if (controller.cron === "40 */6 * * *") {
       if (!env.GEMINI_API_KEY) return;
       const dailyLimit = parseDailyLimit(env.OCR_DAILY_LIMIT);
-      let remainingLimit = dailyLimit;
+      let remainingLimit = 0;
       try {
         const ocrRes = await processPendingOcrJobs(db, {
           dailyLimit,
@@ -101,7 +159,7 @@ export default {
         });
         remainingLimit = ocrRes.remainingDailyLimit;
       } catch (err) {
-        console.error("[cron:ocr] failed:", err);
+        console.error("[cron:ocr] failed:", formatCronError(err, env));
       }
       if (remainingLimit > 0) {
         try {
@@ -111,7 +169,7 @@ export default {
             remainingDailyLimit: remainingLimit,
           });
         } catch (err) {
-          console.error("[cron:synopsis] failed:", err);
+          console.error("[cron:synopsis] failed:", formatCronError(err, env));
         }
       }
       return;

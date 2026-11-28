@@ -1,4 +1,3 @@
-import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getRuntimeDb } from "@/db/client";
 import { users } from "@/db/schema";
@@ -7,6 +6,7 @@ import { verifyJwt } from "@/lib/jwt";
 import {
   PENDING_COOKIE,
   buildSetCookie,
+  canUseLocalDevAuth,
   getJwtSecret,
   isAdminKakaoId,
   isLocalhostOrigin,
@@ -14,6 +14,7 @@ import {
   parseCookieHeader,
   sanitizeRedirectUrl,
   shouldBootstrapAdmin,
+  type AuthUser,
   type PendingSignupPayload,
 } from "@/server/modules/auth";
 import { getAuthEnv } from "@/server/modules/auth-runtime";
@@ -28,7 +29,9 @@ export async function POST(req: Request) {
   try {
     const url = new URL(req.url);
     const cfEnv = getAuthEnv();
-    const secret = getJwtSecret(cfEnv, { allowDevFallback: isLocalhostOrigin(url) });
+    const secret = getJwtSecret(cfEnv, {
+      allowDevFallback: canUseLocalDevAuth(cfEnv, isLocalhostOrigin(url)),
+    });
     const isSecure = url.protocol === "https:";
     const bag = parseCookieHeader(req.headers.get("cookie"));
     const pending = bag[PENDING_COOKIE]
@@ -49,10 +52,10 @@ export async function POST(req: Request) {
     const isAdmin =
       shouldBootstrapAdmin(pending.email, cfEnv.ADMIN_OAUTH_EMAILS) ||
       (pending.provider === "KAKAO" && isAdminKakaoId(pending.subject, cfEnv.ADMIN_KAKAO_IDS));
-    const role = isAdmin ? "ADMIN" : "USER";
+    const role: "USER" | "ADMIN" = isAdmin ? "ADMIN" : "USER";
     const nowIso = new Date().toISOString();
 
-    await db
+    const inserted = await db
       .insert(users)
       .values({
         oauthProvider: pending.provider,
@@ -63,25 +66,24 @@ export async function POST(req: Request) {
         status: "ACTIVE",
         termsAgreedAt: nowIso,
       })
-      .onConflictDoNothing();
+      .onConflictDoNothing()
+      .returning({ id: users.id });
 
-    const [created] = await db
-      .select()
-      .from(users)
-      .where(and(eq(users.oauthProvider, pending.provider), eq(users.oauthSubject, pending.subject)))
-      .limit(1);
-
-    if (!created) throw new AppError("INTERNAL_ERROR", "계정 생성에 실패했습니다.");
-    if (created.status !== "ACTIVE") {
-      throw new AppError("FORBIDDEN", "이용이 제한되거나 탈퇴한 계정입니다.");
+    const created = inserted[0];
+    if (!created) {
+      const res = jsonError(
+        new AppError("CONFLICT", "이미 가입이 완료된 계정입니다. 다시 로그인해 주세요."),
+      );
+      res.headers.append("Set-Cookie", buildSetCookie(PENDING_COOKIE, "", { maxAge: 0, isSecure }));
+      return res;
     }
 
-    const authUser = {
+    const authUser: AuthUser = {
       id: created.id,
-      nickname: created.nickname,
-      email: created.email,
-      role: created.role,
-      oauthProvider: created.oauthProvider,
+      nickname,
+      email: pending.email,
+      role,
+      oauthProvider: pending.provider,
     };
 
     const headers = new Headers();

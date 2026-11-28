@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { getRuntimeDb } from "@/db/client";
+import type { CloudflareEnv } from "@/env";
 import { AppError, jsonError } from "@/lib/errors";
 import { getAuthEnv, requireRuntimeAdmin } from "@/server/modules/auth-runtime";
 import { writeAuditLog } from "@/server/modules/reports";
@@ -17,6 +18,22 @@ import {
 const TriggerSchema = z.object({
   target: z.enum(["KOPIS", "CHANNELS", "OCR", "EXPIRY"]).default("KOPIS"),
 });
+
+const QUERY_SECRET_PATTERN = /([?&](?:key|service|api_key|token|secret)=)[^&\s]+/gi;
+
+function maskSyncErrorMessage(err: unknown, cfEnv: Partial<CloudflareEnv>): string {
+  let msg = err instanceof Error ? err.message : String(err);
+  msg = msg.replace(QUERY_SECRET_PATTERN, "$1[REDACTED]");
+  for (const secret of [cfEnv.KOPIS_API_KEY, cfEnv.GEMINI_API_KEY]) {
+    if (!secret) continue;
+    msg = msg.split(secret).join("[REDACTED]");
+    const encoded = encodeURIComponent(secret);
+    if (encoded !== secret) {
+      msg = msg.split(encoded).join("[REDACTED]");
+    }
+  }
+  return msg;
+}
 
 export async function POST(req: Request) {
   try {
@@ -44,7 +61,7 @@ export async function POST(req: Request) {
             publishedCount: 0,
             draftCount: 0,
             alert: false,
-            error: err instanceof Error ? err.message : String(err),
+            error: maskSyncErrorMessage(err, cfEnv),
           });
         }
       }
@@ -64,7 +81,7 @@ export async function POST(req: Request) {
         });
       } catch (err) {
         ocr = {
-          error: err instanceof Error ? err.message : String(err),
+          error: maskSyncErrorMessage(err, cfEnv),
           remainingDailyLimit: 0,
         };
       }
@@ -77,7 +94,7 @@ export async function POST(req: Request) {
           remainingDailyLimit: ocr.remainingDailyLimit,
         });
       } catch (err) {
-        synopses = { error: err instanceof Error ? err.message : String(err) };
+        synopses = { error: maskSyncErrorMessage(err, cfEnv) };
       }
 
       result = { ocr, synopses };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
-import { recordOutboundClick, voteDealHelpful } from "@/server/modules/deals";
+import { hashSessionIdentity, recordOutboundClick, voteDealHelpful } from "@/server/modules/deals";
 import {
   approveDraftDeal,
   approveUserReport,
@@ -414,5 +414,30 @@ describe("reports & review policy boundaries", () => {
 
     await expect(approveUserReport(insertFailDb, 1, 11, { showId: 1 })).rejects.toThrow("D1 write failure");
     expect(revertedUpdates.some((u) => u.status === "PENDING" && u.reviewerId === null)).toBe(true);
+  });
+
+  it("C-04: hashSessionIdentity ignores User-Agent, parses IP precedence, and uses HMAC-SHA256 with salt", async () => {
+    const reqA = new Request("https://mudeal.example/api/v1/deals/1/clicks", {
+      headers: { "cf-connecting-ip": "203.0.113.10", "user-agent": "Bot/1.0" },
+    });
+    const reqB = new Request("https://mudeal.example/api/v1/deals/1/clicks", {
+      headers: { "cf-connecting-ip": "203.0.113.10", "user-agent": "Mozilla/5.0 Spoofed" },
+    });
+    const reqXff = new Request("https://mudeal.example/api/v1/deals/1/clicks", {
+      headers: { "x-forwarded-for": "203.0.113.10, 10.0.0.1", "user-agent": "Another/2.0" },
+    });
+    const reqLocal = new Request("https://mudeal.example/api/v1/deals/1/clicks");
+
+    const hashA = await hashSessionIdentity(reqA, "salt-one");
+    const hashB = await hashSessionIdentity(reqB, "salt-one");
+    const hashXff = await hashSessionIdentity(reqXff, "salt-one");
+    const hashDiffSalt = await hashSessionIdentity(reqA, "salt-two");
+    const hashDefaultSalt = await hashSessionIdentity(reqLocal);
+
+    expect(hashA).toHaveLength(32);
+    expect(hashA).toBe(hashB);
+    expect(hashA).toBe(hashXff);
+    expect(hashA).not.toBe(hashDiffSalt);
+    expect(hashDefaultSalt).toHaveLength(32);
   });
 });

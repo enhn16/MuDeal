@@ -2,18 +2,8 @@ import { z } from "zod";
 import { getRuntimeDb } from "@/db/client";
 import { DEAL_TYPES, SEAT_GRADES } from "@/db/schema";
 import { AppError, jsonError } from "@/lib/errors";
-import { normalizeExpiresAtToUtcIso } from "@/lib/kst";
 import { requireRuntimeAdmin } from "@/server/modules/auth-runtime";
-import { approveUserReport } from "@/server/modules/reports";
-
-const OptionalExpiresAtSchema = z
-  .string()
-  .nullable()
-  .optional()
-  .refine(
-    (v) => v === undefined || v === null || v.trim() === "" || normalizeExpiresAtToUtcIso(v) !== null,
-    "유효한 마감 일시 형식을 입력해 주세요.",
-  );
+import { approveUserReport, OptionalExpiresAtSchema } from "@/server/modules/reports";
 
 const ApproveSchema = z.object({
   showId: z.number().int().positive(),

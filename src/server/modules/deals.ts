@@ -6,13 +6,32 @@ import { isExpired } from "@/lib/kst";
 import { parseSafeExternalUrl } from "@/lib/url";
 
 const CLICK_DEDUP_WINDOW_MS = 10_000;
+const DEFAULT_SESSION_HASH_SALT = "mudeal-session-identity-salt-v1";
 
-export async function hashSessionIdentity(req: Request): Promise<string> {
-  const ip = req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for") ?? "local";
-  const ua = req.headers.get("user-agent") ?? "unknown";
-  const bytes = new TextEncoder().encode(`${ip}|${ua}`);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0"))
+function extractClientIp(req: Request): string {
+  const cfIp = req.headers.get("cf-connecting-ip")?.trim();
+  if (cfIp) return cfIp;
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) {
+    const first = xff.split(",")[0]?.trim();
+    if (first) return first;
+  }
+  return "local";
+}
+
+export async function hashSessionIdentity(req: Request, salt?: string): Promise<string> {
+  const ip = extractClientIp(req);
+  const keyMaterial = salt && salt.trim().length > 0 ? salt : DEFAULT_SESSION_HASH_SALT;
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(keyMaterial),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(ip));
+  return Array.from(new Uint8Array(sig), (b) => b.toString(16).padStart(2, "0"))
     .join("")
     .slice(0, 32);
 }

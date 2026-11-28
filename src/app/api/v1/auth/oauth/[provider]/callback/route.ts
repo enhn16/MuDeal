@@ -7,6 +7,7 @@ import {
   PENDING_COOKIE,
   STATE_COOKIE,
   buildSetCookie,
+  canUseLocalDevAuth,
   exchangeOAuthProfile,
   getJwtSecret,
   isAdminKakaoId,
@@ -32,7 +33,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
     }
 
     const cfEnv = getAuthEnv();
-    const secret = getJwtSecret(cfEnv, { allowDevFallback: isLocalhostOrigin(url) });
+    const allowDevAuth = canUseLocalDevAuth(cfEnv, isLocalhostOrigin(url));
+    const secret = getJwtSecret(cfEnv, { allowDevFallback: allowDevAuth });
     const isSecure = url.protocol === "https:";
     const bag = parseCookieHeader(req.headers.get("cookie"));
     const statePayload = bag[STATE_COOKIE]
@@ -53,9 +55,9 @@ export async function GET(req: Request, ctx: { params: Promise<{ provider: strin
     if (clientId) {
       const callbackUrl = `${url.origin}/api/v1/auth/oauth/${rawProvider.toLowerCase()}/callback`;
       profile = await exchangeOAuthProfile(provider, code, callbackUrl, cfEnv);
-    } else if (isLocalhostOrigin(url) && code === "dev") {
+    } else if (allowDevAuth && code === "dev") {
       const devAs = url.searchParams.get("as");
-      if (devAs === "admin" || (provider === "GOOGLE" && devAs !== "new")) {
+      if (devAs === "admin") {
         profile = { subject: "dev-admin-001", nickname: "MuDeal운영", email: "admin@mudeal.local" };
       } else if (devAs === "new") {
         profile = { subject: `dev-new-${Date.now()}`, nickname: "신규관객", email: "new@mudeal.local" };

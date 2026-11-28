@@ -22,4 +22,5 @@ export interface CloudflareEnv {
   ADMIN_KAKAO_IDS?: string;
   ADMIN_OAUTH_EMAILS?: string;
   GEMINI_API_KEY?: string;
+  ALLOW_LOCAL_DEV_AUTH?: string;
 }

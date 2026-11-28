@@ -2,6 +2,7 @@ import { and, eq, inArray, like, or } from "drizzle-orm";
 import type { AppDb } from "@/db/client";
 import {
   actors,
+  chunkArray,
   showActors,
   shows,
   syncRuns,
@@ -10,7 +11,7 @@ import {
   type SubRegion,
 } from "@/db/schema";
 import { formatKstDate } from "@/lib/kst";
-import { normalizeExternalHttpsUrl } from "@/lib/url";
+import { normalizeExternalHttpsUrl, parseSafeServerFetchUrl } from "@/lib/url";
 import { isKidsMusical } from "./kids-filter";
 
 const DAEHAKRO_KEYWORDS = ["대학로", "동숭동", "혜화동", "명륜", "이화동", "연건동"];
@@ -36,15 +37,40 @@ export interface ChannelLinks {
   lticket?: string;
 }
 
+const SAFE_CHANNEL_ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
+const SECRET_QUERY_PARAM_RE = /([?&](?:key|service|api_key|token|secret)=)[^&\s]+/gi;
+const MAX_REDACTED_ERROR_LEN = 500;
+const KOPIS_MAX_REDIRECTS = 2;
+
+export function isSafeChannelId(raw: unknown): raw is string {
+  return typeof raw === "string" && SAFE_CHANNEL_ID_RE.test(raw) && !raw.includes("..");
+}
+
+/** Redacts secret query params and raw/URL-encoded secret tokens from logs/DB error messages (capped at 500 chars). */
+export function redactSecrets(text: string, extraSecrets?: Array<string | undefined>): string {
+  let out = text.replace(SECRET_QUERY_PARAM_RE, "$1[REDACTED]");
+  if (extraSecrets) {
+    for (const secret of extraSecrets) {
+      if (!secret) continue;
+      out = out.replaceAll(secret, "[REDACTED]");
+      const encoded = encodeURIComponent(secret);
+      if (encoded && encoded !== secret) {
+        out = out.replaceAll(encoded, "[REDACTED]");
+      }
+    }
+  }
+  return out.length > MAX_REDACTED_ERROR_LEN ? out.slice(0, MAX_REDACTED_ERROR_LEN) : out;
+}
+
 export function parseChannelLinks(raw: string | null | undefined): ChannelLinks {
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return {};
     const out: ChannelLinks = {};
-    if (typeof parsed.nol === "string" && parsed.nol) out.nol = parsed.nol;
-    if (typeof parsed.yes24 === "string" && parsed.yes24) out.yes24 = parsed.yes24;
-    if (typeof parsed.lticket === "string" && parsed.lticket) out.lticket = parsed.lticket;
+    if (isSafeChannelId(parsed.nol)) out.nol = parsed.nol;
+    if (isSafeChannelId(parsed.yes24)) out.yes24 = parsed.yes24;
+    if (isSafeChannelId(parsed.lticket)) out.lticket = parsed.lticket;
     return out;
   } catch {
     return {};
@@ -134,15 +160,43 @@ function toHttpsKopisUrl(raw: string | null | undefined): string | null {
   return normalizeExternalHttpsUrl(raw, "https://www.kopis.or.kr");
 }
 
-async function fetchKopisWithTimeout(
+export async function fetchKopisWithTimeout(
   fetchImpl: typeof fetch,
   url: string,
   timeoutMs = 12_000,
 ): Promise<Response> {
+  let currentUrl = parseSafeServerFetchUrl(url);
+  if (!currentUrl) {
+    throw new Error("Blocked unsafe KOPIS fetch URL");
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error(`KOPIS fetch timeout (${timeoutMs}ms)`)), timeoutMs);
   try {
-    return await fetchImpl(url, { signal: controller.signal });
+    for (let hops = 0; hops <= KOPIS_MAX_REDIRECTS; hops++) {
+      const attempt = await fetchImpl(currentUrl, { redirect: "manual", signal: controller.signal });
+      if (attempt.status >= 300 && attempt.status < 400) {
+        const location = attempt.headers.get("location");
+        await attempt.body?.cancel().catch(() => undefined);
+        if (!location || hops === KOPIS_MAX_REDIRECTS) {
+          throw new Error(`KOPIS redirect blocked (${attempt.status})`);
+        }
+        let nextRaw: string;
+        try {
+          nextRaw = new URL(location, currentUrl).toString();
+        } catch {
+          throw new Error("Invalid KOPIS redirect location");
+        }
+        const nextSafe = parseSafeServerFetchUrl(nextRaw);
+        if (!nextSafe) {
+          throw new Error("Blocked unsafe KOPIS redirect target");
+        }
+        currentUrl = nextSafe;
+        continue;
+      }
+      return attempt;
+    }
+    throw new Error("KOPIS redirect blocked");
   } finally {
     clearTimeout(timer);
   }
@@ -487,8 +541,7 @@ export async function syncKopisShows(
 
         if (!existing && linkedActorIds.length > 0) {
           const followers: Array<{ userId: number; actorId: number }> = [];
-          for (let i = 0; i < linkedActorIds.length; i += 50) {
-            const batchIds = linkedActorIds.slice(i, i + 50);
+          for (const batchIds of chunkArray(linkedActorIds)) {
             const rows = await db
               .select({ userId: userActorFollows.userId, actorId: userActorFollows.actorId })
               .from(userActorFollows)
@@ -496,8 +549,7 @@ export async function syncKopisShows(
             followers.push(...rows);
           }
 
-          for (let i = 0; i < followers.length; i += 8) {
-            const batch = followers.slice(i, i + 8);
+          for (const batch of chunkArray(followers, 8)) {
             await db
               .insert(userNotifications)
               .values(
@@ -528,7 +580,7 @@ export async function syncKopisShows(
 
     return { runId: run.id, fetchedCount: synced, detailFetchCount, status: "SUCCESS" };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = redactSecrets(err instanceof Error ? err.message : String(err), [apiKey]);
     await db
       .update(syncRuns)
       .set({ status: "FAILED", errorMessage: msg, finishedAt: new Date().toISOString() })

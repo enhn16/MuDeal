@@ -58,14 +58,28 @@ export function isLocalhostHost(host: string | null | undefined): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1";
 }
 
+export function canUseLocalDevAuth(
+  cfEnv: Partial<CloudflareEnv> | undefined,
+  isLocalhost: boolean,
+): boolean {
+  return cfEnv?.ALLOW_LOCAL_DEV_AUTH === "true" && isLocalhost;
+}
+
 /** Prevent open redirects: allow only single-slash internal paths. */
 export function sanitizeRedirectUrl(raw: string | null | undefined, fallback = "/"): string {
   if (!raw) return fallback;
+  if (/[\u0000-\u001F\u007F]/.test(raw)) return fallback;
   const trimmed = raw.trim();
   if (!trimmed.startsWith("/") || trimmed.startsWith("//") || trimmed.includes("\\")) {
     return fallback;
   }
-  return trimmed;
+  try {
+    const parsed = new URL(trimmed, "https://mudeal.invalid");
+    if (parsed.origin !== "https://mudeal.invalid") return fallback;
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return fallback;
+  }
 }
 
 /** DD-001: auto-assign ADMIN if email is listed in ADMIN_OAUTH_EMAILS. */

@@ -3,6 +3,8 @@ import {
   addActorFollow,
   buildAutoCalendarEvents,
   chunkArray,
+  getNotificationsFeed,
+  markNotificationsRead,
   removeActorFollow,
   withdrawUserAccount,
 } from "@/server/modules/personal";
@@ -55,7 +57,7 @@ describe("personal calendar auto-event extraction", () => {
     });
   });
 
-  it("withdrawUserAccount revokes sessions, deletes personal data, anonymizes reports, and marks WITHDRAWN", async () => {
+  it("withdrawUserAccount revokes sessions, decrements follower/helpful counts, deletes personal data, anonymizes reports, and marks WITHDRAWN (C-03)", async () => {
     const updateCalls: Array<Record<string, unknown>> = [];
     const deleteCalls = vi.fn(async () => undefined);
     let selectStep = 0;
@@ -72,6 +74,7 @@ describe("personal calendar auto-event extraction", () => {
           where: async () => {
             selectStep += 1;
             if (selectStep === 1) return [{ actorId: 1 }]; // followed actors
+            if (selectStep === 2) return [{ dealId: 5 }, { dealId: 6 }]; // helpful votes
             return [{ id: 10, evidenceR2Key: "reports/42/123-abcd.png" }]; // user reports
           },
         }),
@@ -88,6 +91,8 @@ describe("personal calendar auto-event extraction", () => {
     expect(deleteCalls).toHaveBeenCalledTimes(6);
     expect(bucketDelete).toHaveBeenCalledWith("reports/42/123-abcd.png");
     expect(updateCalls.some((u) => "revokedAt" in u)).toBe(true);
+    expect(updateCalls.some((u) => "followerCount" in u)).toBe(true);
+    expect(updateCalls.some((u) => "helpfulCount" in u)).toBe(true);
     expect(updateCalls.some((u) => u.reporterNickname === "익명의 관객" && u.evidenceR2Key === null)).toBe(true);
     expect(
       updateCalls.some(
@@ -98,6 +103,62 @@ describe("personal calendar auto-event extraction", () => {
           u.oauthSubject.startsWith("withdrawn:42:"),
       ),
     ).toBe(true);
+  });
+
+  it("getNotificationsFeed is strictly read-only and markNotificationsRead updates unread rows in chunks (C-05)", async () => {
+    const updateSpy = vi.fn();
+    let selectCall = 0;
+    const readOnlyDb = {
+      select: () => ({
+        from: () => ({
+          innerJoin: () => ({
+            where: async () => [],
+          }),
+          where: () => {
+            selectCall += 1;
+            if (selectCall === 1) {
+              return Promise.resolve([{ id: 1, showId: 10, actorId: null, isRead: 0 }]);
+            }
+            return {
+              orderBy: () => ({
+                limit: async () => [{ id: 1, showId: 10, actorId: null, isRead: 0 }],
+              }),
+            };
+          },
+        }),
+      }),
+      update: updateSpy,
+    } as unknown as Parameters<typeof getNotificationsFeed>[0];
+
+    const feed = await getNotificationsFeed(readOnlyDb, 7, { mode: "unread" });
+    expect(feed.totalUnread).toBe(1);
+    expect(feed.items).toHaveLength(1);
+    expect(updateSpy).not.toHaveBeenCalled();
+
+    const updatedBatches: number[] = [];
+    const markDb = {
+      update: () => ({
+        set: () => ({
+          where: () => ({
+            returning: async () => {
+              const batch = updatedBatches.length === 0 ? 50 : 10;
+              updatedBatches.push(batch);
+              return Array.from({ length: batch }, (_, i) => ({ id: i + 1 }));
+            },
+          }),
+        }),
+      }),
+      select: () => ({
+        from: () => ({
+          where: async () => [{ count: 3 }],
+        }),
+      }),
+    } as unknown as Parameters<typeof markNotificationsRead>[0];
+
+    const ids = Array.from({ length: 60 }, (_, i) => i + 1);
+    const res = await markNotificationsRead(markDb, 7, [...ids, 1, 2]);
+    expect(updatedBatches).toEqual([50, 10]);
+    expect(res).toEqual({ markedCount: 60, unreadCount: 3 });
   });
 
   it("ignores invalid expiresAt in buildAutoCalendarEvents without throwing and chunks large ID arrays", () => {

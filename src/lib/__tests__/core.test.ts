@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { calcKstDDay, formatKstDate, formatKstDateTime, isExpired, resolveDatePreset, startOfKstDayUtc } from "@/lib/kst";
 import { calcDiscountRate, compareDealsForDisplay, summarizeLowestDeals } from "@/lib/pricing";
-import { parseSafeExternalUrl, serializeSearchParams } from "@/lib/url";
+import {
+  isPrivateOrInternalHost,
+  normalizeExternalHttpsUrl,
+  parseSafeExternalUrl,
+  parseSafeServerFetchUrl,
+  serializeSearchParams,
+} from "@/lib/url";
 import { AppError, jsonError } from "@/lib/errors";
 
 describe("kst utilities", () => {
@@ -90,5 +96,60 @@ describe("url & error utilities", () => {
         requestId: "req-1",
       },
     });
+  });
+
+  it("C-08: blocks SSRF host obfuscations, all IPv6 literals, non-443 ports, and reserved CIDRs", () => {
+    // Trailing dots & consecutive dots
+    expect(isPrivateOrInternalHost("localhost..")).toBe(true);
+    expect(isPrivateOrInternalHost("127.0.0.1...")).toBe(true);
+    expect(isPrivateOrInternalHost("example..com")).toBe(true);
+    expect(isPrivateOrInternalHost(".example.com")).toBe(true);
+
+    // All IPv6 literals blocked
+    expect(isPrivateOrInternalHost("::1")).toBe(true);
+    expect(isPrivateOrInternalHost("[2001:4860:4860::8888]")).toBe(true);
+    expect(isPrivateOrInternalHost("2606:4700:4700::1111")).toBe(true);
+
+    // Shorthand / non-standard dotted IPv4 & hex/octal
+    expect(isPrivateOrInternalHost("127.1")).toBe(true);
+    expect(isPrivateOrInternalHost("127.0.1")).toBe(true);
+    expect(isPrivateOrInternalHost("0x7f.0.0.1")).toBe(true);
+    expect(isPrivateOrInternalHost("0177.0.0.1")).toBe(true);
+
+    // Reserved documentation / IETF ranges
+    expect(isPrivateOrInternalHost("192.0.0.1")).toBe(true);
+    expect(isPrivateOrInternalHost("192.0.2.10")).toBe(true);
+    expect(isPrivateOrInternalHost("198.51.100.5")).toBe(true);
+    expect(isPrivateOrInternalHost("203.0.113.9")).toBe(true);
+
+    // Valid public host / IPv4 allowed
+    expect(isPrivateOrInternalHost("www.kopis.or.kr")).toBe(false);
+    expect(isPrivateOrInternalHost("8.8.8.8")).toBe(false);
+
+    // parseSafeServerFetchUrl: non-443 ports & IPv6 & reserved CIDRs rejected
+    expect(parseSafeServerFetchUrl("https://www.kopis.or.kr/upload/poster.jpg")).toBe(
+      "https://www.kopis.or.kr/upload/poster.jpg",
+    );
+    expect(parseSafeServerFetchUrl("https://www.kopis.or.kr:443/upload/poster.jpg")).toBe(
+      "https://www.kopis.or.kr/upload/poster.jpg",
+    );
+    expect(parseSafeServerFetchUrl("https://www.kopis.or.kr:8443/upload/poster.jpg")).toBeNull();
+    expect(parseSafeServerFetchUrl("https://www.kopis.or.kr:8080/upload/poster.jpg")).toBeNull();
+    expect(parseSafeServerFetchUrl("https://[2001:4860:4860::8888]/img.png")).toBeNull();
+    expect(parseSafeServerFetchUrl("https://192.0.2.1/img.png")).toBeNull();
+    expect(parseSafeServerFetchUrl("https://127.1/secret")).toBeNull();
+  });
+
+  it("C-08: blocks triple-slash and backslash inputs and verifies defaultOrigin in normalizeExternalHttpsUrl", () => {
+    expect(normalizeExternalHttpsUrl("///evil.com/path")).toBeNull();
+    expect(normalizeExternalHttpsUrl("/\\evil.com/path", "https://www.kopis.or.kr")).toBeNull();
+    expect(normalizeExternalHttpsUrl("https://example.com\\@evil.com")).toBeNull();
+    expect(normalizeExternalHttpsUrl("//cdn.interpark.com/poster.jpg")).toBe(
+      "https://cdn.interpark.com/poster.jpg",
+    );
+    expect(normalizeExternalHttpsUrl("/upload/poster.jpg", "https://www.kopis.or.kr")).toBe(
+      "https://www.kopis.or.kr/upload/poster.jpg",
+    );
+    expect(normalizeExternalHttpsUrl("/upload/poster.jpg", "http://www.kopis.or.kr")).toBeNull();
   });
 });

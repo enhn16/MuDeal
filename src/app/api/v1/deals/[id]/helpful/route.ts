@@ -1,7 +1,7 @@
 import { getRuntimeDb } from "@/db/client";
 import { AppError, jsonError } from "@/lib/errors";
 import { ACCESS_COOKIE, getOptionalAuthUser, parseCookieHeader } from "@/server/modules/auth";
-import { getRuntimeJwtSecret } from "@/server/modules/auth-runtime";
+import { getAuthEnv, getRuntimeJwtSecret } from "@/server/modules/auth-runtime";
 import { hashSessionIdentity, voteDealHelpful } from "@/server/modules/deals";
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -14,7 +14,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     const db = getRuntimeDb();
     const bag = parseCookieHeader(req.headers.get("cookie"));
     const user = await getOptionalAuthUser(db, bag[ACCESS_COOKIE], getRuntimeJwtSecret(req));
-    const sessionHash = await hashSessionIdentity(req);
+    const sessionHash = await hashSessionIdentity(req, getAuthEnv().JWT_SECRET);
     const data = await voteDealHelpful(db, dealId, { userId: user?.id, sessionHash });
     return Response.json({ data });
   } catch (err) {

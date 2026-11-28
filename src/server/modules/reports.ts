@@ -1,7 +1,9 @@
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
+import { z } from "zod";
 import type { AppDb } from "@/db/client";
 import {
   auditLogs,
+  chunkArray,
   dealReports,
   deals,
   showActors,
@@ -21,7 +23,16 @@ import type { AuthUser } from "./auth";
 
 export const DAILY_REPORT_LIMIT = 10;
 const D1_NOTI_INSERT_CHUNK = 8;
-const D1_IN_ARRAY_CHUNK = 50;
+
+/** Shared Zod field validator for optional expiresAt inputs across report/admin APIs. */
+export const OptionalExpiresAtSchema = z
+  .string()
+  .nullable()
+  .optional()
+  .refine(
+    (v) => v === undefined || v === null || v.trim() === "" || normalizeExpiresAtToUtcIso(v) !== null,
+    "유효한 마감 일시 형식을 입력해 주세요.",
+  );
 
 /** Strictly validate optional expiresAt and normalize into canonical UTC ISO string. */
 export function normalizeOptionalExpiresAt(raw: string | null | undefined): string | null {
@@ -139,10 +150,8 @@ export async function fanoutNewDealNotifications(
       .where(eq(showActors.showId, deal.showId)),
   ]);
 
-  const actorIds = castRows.map((c) => c.actorId);
   const followers: Array<{ userId: number; actorId: number }> = [];
-  for (let i = 0; i < actorIds.length; i += D1_IN_ARRAY_CHUNK) {
-    const chunk = actorIds.slice(i, i + D1_IN_ARRAY_CHUNK);
+  for (const chunk of chunkArray(castRows.map((c) => c.actorId))) {
     const rows = await db
       .select({ userId: userActorFollows.userId, actorId: userActorFollows.actorId })
       .from(userActorFollows)
@@ -181,11 +190,8 @@ export async function fanoutNewDealNotifications(
     });
   }
 
-  for (let i = 0; i < toInsert.length; i += D1_NOTI_INSERT_CHUNK) {
-    await db
-      .insert(userNotifications)
-      .values(toInsert.slice(i, i + D1_NOTI_INSERT_CHUNK))
-      .onConflictDoNothing();
+  for (const batch of chunkArray(toInsert, D1_NOTI_INSERT_CHUNK)) {
+    await db.insert(userNotifications).values(batch).onConflictDoNothing();
   }
 }
 

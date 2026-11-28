@@ -21,7 +21,13 @@ const STATUTORY_DISCOUNT_KEYWORDS = [
   "어르신",
   "보훈",
   "의사상자",
+  "의사자",
+  "의상자",
+  "고엽제",
+  "등록포로",
+  "억류지",
   "임산부",
+  "임신부",
   "다자녀",
   "다둥이",
   "문화누리",
@@ -76,6 +82,7 @@ export function isStatutoryDiscount(text: string | null | undefined): boolean {
   const s = (text ?? "").trim();
   if (!s) return false;
   if (/장애(?!물)/.test(s)) return true;
+  if (/(?:^|[\s(/])복지\s*\d*\s*%?/.test(s)) return true;
   return STATUTORY_DISCOUNT_KEYWORDS.some((k) => s.includes(k));
 }
 
@@ -122,43 +129,61 @@ export function classifyDiscountLabel(rawLabel: string, extraHints: string[] = [
     if (!tags.includes(tag)) tags.push(tag);
   };
 
-  if (/마티네|낮\s*공연|낮공|평일\s*낮/i.test(combined)) {
+  if (/마티네|낮\s*공연|낮공|평일\s*낮|오후\s*[1-4]시\s*\d*분?\s*공연/i.test(combined)) {
     addTag("MATINEE");
   }
   if (/군인|장병|현역|국군|의무복무|경찰|소방|공무원|군무원/i.test(combined)) {
     addTag("MILITARY_PUBLIC");
   }
-  if (/청소년|학생|초[·./\s]?중[·./\s]?고|대학생|수험생|수험표|청년|문화패스|만\s*\d+\s*세/i.test(combined)) {
+  if (
+    /청소년|학생|초[·,./\s]?중[·,./\s]?고|대학생|대학원|수험생|수험표|청년|문화패스|만\s*\d+\s*세|유스\s*할인|유아\s*\/?\s*10대|10대\s*할인|20['’]?s|스물\s*[-~]\s*스물/i.test(
+      combined,
+    )
+  ) {
     addTag("YOUTH_STUDENT");
   }
-  if (/직장인|사원증|명함/i.test(combined)) {
+  if (/직장인|사원증|명함|퇴근\s*(?:후|하고)|종사자|교역자|목회자|종교인/i.test(combined)) {
     addTag("OFFICE_WORKER");
   }
-  if (/재관람|이전\s*시즌|유료\s*티켓|레퍼토리|마니아|할인권\s*소지|실물\s*할인권|쿠폰\s*소지|패밀리(?!세일)/i.test(combined)) {
+  if (
+    /재관람|재방문|보고\s*또\s*보고|이전\s*시즌|유료\s*티켓|실물\s*(?:유료\s*)?티켓|관람\s*티켓|문화\s*릴레이|릴레이\s*티켓|레퍼토리|마니아|할인권\s*소지|실물\s*할인(?:권|쿠폰)|쿠폰\s*소지|패밀리(?!세일)|\d+\s*회차\s*관람/i.test(
+      combined,
+    )
+  ) {
     addTag("REWATCH");
   }
-  if (/지역|거주자|근무자|구민|시민|도민/i.test(combined)) {
+  if (/지역\s*주민|(?:구|시|도|동)\s*주민|거주자|근무자|구민|시민|도민|지역\s*할인/i.test(combined)) {
     addTag("LOCAL_RESIDENT");
   }
   if (
-    /패키지|1\s*\+\s*1|\d+\s*인\s*(?:이상|할인|패키지|예매|관람|권)|[2-9]\s*매\s*(?:이상|패키지|할인)|커플|단체|가족\s*할인/i.test(
+    /패키지|1\s*\+\s*1|[2-9]\s*인\s*(?:이상|할인|패키지|예매|관람|권|모임|가족|식사|탑승)|\d{2,}\s*인\s*(?:이상|할인|패키지|모임)|[2-9]\s*매\s*(?:이상|패키지|할인)|커플|단체|가족\s*할인|가족\s*[2-9]인|엄마랑\s*딸|친구\s*할인|1인\s*가구/i.test(
       combined,
     )
   ) {
     addTag("GROUP_PACKAGE");
   }
-  const cardText = combined.replace(/포토\s*카드/gi, " ");
+  const cardText = combined
+    .replace(/포토\s*카드/gi, " ")
+    .replace(/재관람\s*카드/gi, " ")
+    .replace(/스탬프\s*카드/gi, " ")
+    .replace(/적립\s*카드/gi, " ");
   if (
-    /(?<!포토)카드|제휴|멤버십|토스페이|네이버페이|카카오페이|(?:신한|현대|삼성|국민|우리|하나|롯데|비씨|bc|nh|kb)\s*카드/i.test(
+    /카드|제휴|멤버십|멤버\s*할인|회원\s*(?:할인|특별)|유료\s*회원|toping|토핑|h\.?point|jtn\s*회원|팬클럽|토스페이|네이버페이|카카오페이|(?:신한|현대|삼성|국민|우리|하나|롯데|비씨|bc|nh|kb|nol)\s*카드/i.test(
       cardText,
     )
   ) {
     addTag("CARD_PARTNER");
   }
+  // Audience-personal birthday (생일자/생일 할인/B-DAY/증빙) is conditional; show anniversary ("29번째 생일", "생일을 축하해") is unconditional.
+  const isShowAnniversary = /\d+\s*번째\s*생일|주년\s*생일|생일을\s*축하|생일\s*축하\s*파티/i.test(combined);
+  const isPersonalBirthday =
+    !isShowAnniversary &&
+    /(?:생일자|생일\s*할인|생일\s*본인|당월\s*생일|b[-_ ]?day|생일.*(?:증빙|지참|본인))/i.test(combined);
   if (
-    /드레스\s*코드|생일|SNS|팔로우|인증|소지자|증빙|지참|본인만|본인한정|확인필수|시야\s*제한|휠체어|평일|주중|화[·/,]?수[·/,]?목|예술인\s*패스|유료\s*회원/i.test(
-      combined,
-    ) &&
+    (isPersonalBirthday ||
+      /드레스\s*코드|bridal\s*shower|버진\s*로드|SNS|팔로우|플친|후기\s*남기기|인증|소지자|증빙|지참|본인만|본인한정|확인필수|시야\s*제한|휠체어|평일|주중|화[·/,]?수[·/,]?목|수목\s*평일|예술인|자원봉사|창작\s*후원|한복\s*착용|채널\s*할인|스마트\s*(?:안경|자막)/i.test(
+        combined,
+      )) &&
     tags.length === 0
   ) {
     addTag("EVENT_CONDITION");
@@ -167,10 +192,10 @@ export function classifyDiscountLabel(rawLabel: string, extraHints: string[] = [
   let dealType: DealType = "DISCOUNT_SITE";
   if (/로터리/i.test(combined)) {
     dealType = "LOTTERY";
-  } else if (/슈가\s*day|슈가데이|yes24\s*데이|예스24\s*데이|스페셜\s*데이/i.test(combined)) {
+  } else if (/슈가\s*day|슈가데이|yes24\s*데이|예스24\s*데이|스페셜\s*데이|문화가\s*있는\s*(?:날|수요일)|문화의\s*날/i.test(combined)) {
     dealType = "SPECIAL_DAY";
   } else if (
-    /타임세일|타임특가|넵프라이즈|예스특가|네이버특가|엔젤티켓|놀특가|nol특가|개막\s*특가|오프닝\s*위크|프리뷰|조기예매|얼리버드|오픈\s*기념/i.test(
+    /타임세일|타임\s*세일|타임특가|넵프라이즈|예스특가|네이버특가|엔젤티켓|놀특가|nol특가|개막\s*기념|개막\s*특가|초연\s*기념|오프닝\s*위크|프리뷰|조기예매|얼리버드|오픈\s*기념|블프|블랙프라이데이/i.test(
       combined,
     )
   ) {

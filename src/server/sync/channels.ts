@@ -22,14 +22,15 @@ import {
   normalizeExpiresAtToUtcIso,
 } from "@/lib/kst";
 import { calcDiscountRate } from "@/lib/pricing";
-import { normalizeExternalHttpsUrl } from "@/lib/url";
+import { normalizeExternalHttpsUrl, parseSafeServerFetchUrl } from "@/lib/url";
 import { recomputeShowPriceCache } from "@/server/modules/reports";
 import { classifyDiscountLabel, hasMeaningfulBenefit, isStatutoryDiscount } from "./benefit-filter";
 import { isKidsMusical } from "./kids-filter";
-import { normalizeTitle, parseChannelLinks, type ChannelLinks } from "./kopis";
+import { isSafeChannelId, normalizeTitle, parseChannelLinks, redactSecrets, type ChannelLinks } from "./kopis";
 
 export const AUTO_PUBLISH_CONFIDENCE = 0.85;
 const CHANNEL_FETCH_TIMEOUT_MS = 12_000;
+const CHANNEL_MAX_REDIRECTS = 2;
 
 function fnv1aHex(input: string): string {
   let h = 0x811c9dc5;
@@ -40,15 +41,56 @@ function fnv1aHex(input: string): string {
   return (h >>> 0).toString(16).padStart(8, "0");
 }
 
-async function fetchWithTimeout(
+export async function fetchWithTimeout(
   url: string,
   init: RequestInit = {},
   timeoutMs = CHANNEL_FETCH_TIMEOUT_MS,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<Response> {
+  let currentUrl = parseSafeServerFetchUrl(url);
+  if (!currentUrl) {
+    throw new Error("Blocked unsafe channel fetch URL");
+  }
+
+  let currentInit: RequestInit = init;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error(`Fetch timeout (${timeoutMs}ms)`)), timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    for (let hops = 0; hops <= CHANNEL_MAX_REDIRECTS; hops++) {
+      const attempt = await fetchImpl(currentUrl, {
+        ...currentInit,
+        redirect: "manual",
+        signal: controller.signal,
+      });
+      if (attempt.status >= 300 && attempt.status < 400) {
+        const location = attempt.headers.get("location");
+        await attempt.body?.cancel().catch(() => undefined);
+        if (!location || hops === CHANNEL_MAX_REDIRECTS) {
+          throw new Error(`Channel redirect blocked (${attempt.status})`);
+        }
+        let nextRaw: string;
+        try {
+          nextRaw = new URL(location, currentUrl).toString();
+        } catch {
+          throw new Error("Invalid channel redirect location");
+        }
+        const nextSafe = parseSafeServerFetchUrl(nextRaw);
+        if (!nextSafe) {
+          throw new Error("Blocked unsafe channel redirect target");
+        }
+        if (
+          attempt.status === 303 ||
+          ((attempt.status === 301 || attempt.status === 302) &&
+            (currentInit.method ?? "GET").toUpperCase() === "POST")
+        ) {
+          currentInit = { ...currentInit, method: "GET", body: undefined };
+        }
+        currentUrl = nextSafe;
+        continue;
+      }
+      return attempt;
+    }
+    throw new Error("Channel redirect blocked");
   } finally {
     clearTimeout(timer);
   }
@@ -757,7 +799,7 @@ export async function runChannelAdapter(
       alert: false,
     };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = redactSecrets(err instanceof Error ? err.message : String(err));
     await db
       .update(syncRuns)
       .set({ status: "FAILED", errorMessage: msg, finishedAt: new Date().toISOString() })
@@ -958,7 +1000,7 @@ export function parseNolMusicalHtml(html: string): Array<{
     for (const it of items) {
       if (!it.id || !it.title) continue;
       const goodsCode = it.id.split(":")[0]?.trim();
-      if (!goodsCode) continue;
+      if (!goodsCode || !isSafeChannelId(goodsCode)) continue;
       const price = it.prices?.[0];
       const basePrice = parseKrwDigits(price?.originPrice);
       const salePrice = parseKrwDigits(price?.discountPrice);

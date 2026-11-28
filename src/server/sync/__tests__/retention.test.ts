@@ -36,14 +36,14 @@ describe("TD-001: purgeExpiredRetentionData", () => {
                 case 9:
                   return [{ id: 60 }]; // audit_logs
                 case 10:
-                  return [{ id: 70 }]; // rejected deal_reports
-                case 11:
-                  return [{ id: 80 }]; // unreferenced ended shows (>365d)
-                case 12:
                   return [
                     { id: 90, evidenceR2Key: "reports/7/old-a.png" },
                     { id: 91, evidenceR2Key: "reports/8/old-b.jpg" },
-                  ]; // R2 evidence cleanup
+                  ]; // R2 evidence cleanup (runs BEFORE rejected deal_reports delete)
+                case 11:
+                  return [{ id: 70, evidenceR2Key: null }]; // rejected deal_reports
+                case 12:
+                  return [{ id: 80 }]; // unreferenced ended shows (>365d)
                 default:
                   return [];
               }
@@ -117,5 +117,74 @@ describe("TD-001: purgeExpiredRetentionData", () => {
     // Clamped to 500 max (and 50 max for ended shows)
     expect(Math.max(...observedLimits)).toBe(500);
     expect(observedLimits.at(-1)).toBe(50);
+  });
+
+  it("C-02: deletes R2 evidence strictly before deleting >180d rejected deal_reports and skips DB delete if R2 delete fails", async () => {
+    const timeline: string[] = [];
+    const deletedReportChunks: number[][] = [];
+    let selectCall = 0;
+
+    const mockDb = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => {
+              selectCall += 1;
+              if (selectCall === 10) {
+                return [{ id: 1, evidenceR2Key: "reports/1/step9.png" }];
+              }
+              if (selectCall === 11) {
+                return [
+                  { id: 71, evidenceR2Key: "reports/71/overflow-ok.png" },
+                  { id: 72, evidenceR2Key: "reports/72/overflow-fail.png" },
+                  { id: 73, evidenceR2Key: null },
+                ];
+              }
+              return [];
+            },
+          }),
+        }),
+      }),
+      delete: () => ({
+        where: async () => {
+          timeline.push("db.delete:deal_reports");
+          return undefined;
+        },
+      }),
+      update: () => ({
+        set: () => ({
+          where: async () => {
+            timeline.push("db.update:clear_r2_key");
+            return undefined;
+          },
+        }),
+      }),
+    } as unknown as Parameters<typeof purgeExpiredRetentionData>[0];
+
+    // Capture exact chunk IDs passed to deleteByIdsChunked via bucket spy + summary verification
+    const fakeBucket = {
+      delete: vi.fn(async (key: string) => {
+        timeline.push(`r2.delete:${key}`);
+        if (key.includes("overflow-fail")) {
+          throw new Error("R2 transient error");
+        }
+        deletedReportChunks.push([key.length]);
+      }),
+    } as unknown as R2Bucket;
+
+    const summary = await purgeExpiredRetentionData(mockDb, new Date("2026-11-27T16:00:00.000Z"), {
+      evidenceBucket: fakeBucket,
+    });
+
+    // Step 9 R2 cleanup AND step 10 pre-delete R2 cleanup both run strictly BEFORE db.delete:deal_reports
+    const dbDeleteIdx = timeline.indexOf("db.delete:deal_reports");
+    expect(dbDeleteIdx).toBeGreaterThan(0);
+    expect(timeline.indexOf("r2.delete:reports/1/step9.png")).toBeLessThan(dbDeleteIdx);
+    expect(timeline.indexOf("r2.delete:reports/71/overflow-ok.png")).toBeLessThan(dbDeleteIdx);
+    expect(timeline.indexOf("r2.delete:reports/72/overflow-fail.png")).toBeLessThan(dbDeleteIdx);
+
+    // Row 71 (R2 deleted) + Row 73 (null key) deleted = 2; Row 72 skipped because R2 delete failed!
+    expect(summary.rejectedReports).toBe(2);
+    expect(summary.r2ObjectsDeleted).toBe(2);
   });
 });

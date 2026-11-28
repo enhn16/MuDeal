@@ -466,3 +466,15 @@ export const auditLogs = sqliteTable(
   },
   (t) => [index("idx_audit_target").on(t.targetType, t.targetId, t.createdAt)],
 );
+
+/** Splits arrays into safe chunks under Cloudflare D1's 100-bind-parameter SQL limit. */
+export const D1_IN_ARRAY_CHUNK = 50;
+
+export function chunkArray<T>(items: T[], size = D1_IN_ARRAY_CHUNK): T[][] {
+  if (items.length === 0) return [];
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}

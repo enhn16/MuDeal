@@ -11,6 +11,7 @@ interface FeedItem {
   body: string;
   showId: number | null;
   dealId: number | null;
+  isRead?: number | boolean;
   isSaved: number;
   createdAt: string;
 }
@@ -44,7 +45,6 @@ export function TargetNewsFeed({
     const qs = new URLSearchParams({
       mode,
       ...(targetType === "ACTOR" ? { actorId: String(targetId) } : { showId: String(targetId) }),
-      ...(mode === "unread" ? { autoMarkRead: "true" } : {}),
     });
     const res = await fetch(`/api/v1/me/notifications?${qs.toString()}`);
     if (!res.ok) return [];
@@ -61,7 +61,20 @@ export function TargetNewsFeed({
         const unread = await fetchFeed("unread");
         if (!active) return;
         setUnreadItems(unread);
-        if (unread.length > 0) router.refresh();
+        setLoading(false);
+        const ids = unread.filter((i) => !i.isRead).map((i) => i.id);
+        if (ids.length > 0) {
+          try {
+            const markRes = await fetch("/api/v1/me/notifications", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ids }),
+            });
+            if (active && markRes.ok) router.refresh();
+          } catch {
+            // 읽음 처리 실패 시 기존 목록 UI는 유지
+          }
+        }
       } catch {
         if (active) setActionError("소식을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.");
       } finally {

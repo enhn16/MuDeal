@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-
 import type { AppDb } from "@/db/client";
 import {
   actors,
+  chunkArray,
   dealHelpfulVotes,
   dealReports,
   deals,
@@ -24,16 +25,7 @@ import { parseBasePrices } from "./shows";
 export const MAX_CALENDAR_EVENTS = 200;
 export const MAX_SEARCH_PRESETS = 5;
 const RECENT_NOTI_DAYS = 30;
-const D1_IN_ARRAY_CHUNK = 50;
-
-export function chunkArray<T>(items: T[], size = D1_IN_ARRAY_CHUNK): T[][] {
-  if (items.length === 0) return [];
-  const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size));
-  }
-  return chunks;
-}
+export { chunkArray };
 
 export interface CalendarAutoEvent {
   id: string;
@@ -326,7 +318,7 @@ export async function listFollowedActorShows(db: AppDb, userId: number, now = ne
   };
 }
 
-// --- Story Bar & Notifications (auto-read / 30d recent / saved) ---
+// --- Story Bar & Notifications (read-only feed + explicit mark-read / 30d recent / saved) ---
 export async function getNotificationsFeed(
   db: AppDb,
   userId: number,
@@ -334,7 +326,6 @@ export async function getNotificationsFeed(
     mode?: "unread" | "recent" | "saved";
     actorId?: number;
     showId?: number;
-    autoMarkRead?: boolean;
   } = {},
   now = new Date(),
 ) {
@@ -400,15 +391,34 @@ export async function getNotificationsFeed(
     .orderBy(desc(userNotifications.createdAt))
     .limit(50);
 
-  if (opts.autoMarkRead && mode === "unread" && items.length > 0) {
-    const idsToRead = items.map((i) => i.id);
-    await db
+  return { stories, totalUnread: allUnread.length, items };
+}
+
+export async function markNotificationsRead(db: AppDb, userId: number, ids: number[]) {
+  const uniqueIds = Array.from(new Set(ids));
+  let markedCount = 0;
+
+  for (const chunk of chunkArray(uniqueIds)) {
+    const updated = await db
       .update(userNotifications)
       .set({ isRead: 1 })
-      .where(and(eq(userNotifications.userId, userId), inArray(userNotifications.id, idsToRead)));
+      .where(
+        and(
+          eq(userNotifications.userId, userId),
+          eq(userNotifications.isRead, 0),
+          inArray(userNotifications.id, chunk),
+        ),
+      )
+      .returning({ id: userNotifications.id });
+    markedCount += updated.length;
   }
 
-  return { stories, totalUnread: allUnread.length, items };
+  const [row] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(userNotifications)
+    .where(and(eq(userNotifications.userId, userId), eq(userNotifications.isRead, 0)));
+
+  return { markedCount, unreadCount: Number(row?.count ?? 0) };
 }
 
 export async function toggleSaveNotification(db: AppDb, userId: number, notiId: number, isSaved?: boolean) {
@@ -639,6 +649,18 @@ export async function withdrawUserAccount(
       .update(actors)
       .set({ followerCount: sql`max(0, ${actors.followerCount} - 1)` })
       .where(inArray(actors.id, chunk));
+  }
+
+  const votedDeals = await db
+    .select({ dealId: dealHelpfulVotes.dealId })
+    .from(dealHelpfulVotes)
+    .where(eq(dealHelpfulVotes.userId, userId));
+
+  for (const chunk of chunkArray(Array.from(new Set(votedDeals.map((v) => v.dealId))))) {
+    await db
+      .update(deals)
+      .set({ helpfulCount: sql`max(0, ${deals.helpfulCount} - 1)` })
+      .where(inArray(deals.id, chunk));
   }
 
   await Promise.all([
